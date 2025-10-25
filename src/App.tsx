@@ -1,8 +1,7 @@
-import { useState } from 'react'
-import './App.css'
+import Circle from "./components/Circle"
+import "./App.css"
 
 function App() {
-  const [count, setCount] = useState(0)
 
   return (
     <>
@@ -10,16 +9,8 @@ function App() {
         <span> - A tool for visualizing automatic differentiation</span>
       </h1>
       <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
+        <Circle x={100} y={100} radius={40} color="blue" numberOfCircles={5} />
       </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
     </>
   )
 }
