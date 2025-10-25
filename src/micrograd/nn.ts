@@ -1,7 +1,6 @@
-import { Value, add, mul, pow, neg, exp, sigmoid, toValue } from "./engine";
-import type { ValueInput } from "./engine";
-// base class
+import { Value, add, mul, sigmoid } from "./engine";
 
+// base class
 abstract class Module {
   abstract parameters(): Value[];
   zeroGrad() {

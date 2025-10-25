@@ -10,6 +10,19 @@ interface NetworkVisualizerProps {
   height?: number;
 }
 
+interface NodeData {
+  id: string;
+  x: number;
+  y: number;
+  type: 'input' | 'hidden' | 'output';
+}
+
+interface EdgeData {
+  source: NodeData;
+  target: NodeData;
+  weight: number;
+}
+
 export function NetworkVisualizer({
   mlp,
   inputs,
@@ -25,16 +38,15 @@ export function NetworkVisualizer({
     svg.selectAll('*').remove();
 
     // Extract network structure
-    const nodes: any[] = [];
-    const edges: any[] = [];
+    const nodes: NodeData[] = [];
+    const edges: EdgeData[] = [];
 
     const numLayers = mlp.layers.length + 1; // +1 for input layer
     const layerX = d3.scaleLinear()
       .domain([0, numLayers - 1])
       .range([80, width - 80]);
 
-    // Input layer
-    inputs.forEach((val, i) => {
+    for (let i = 0; i < inputs.length; i++) {
       const layerSize = inputs.length;
       const y = height / 2 + (i - (layerSize - 1) / 2) * 60;
       nodes.push({
@@ -43,13 +55,13 @@ export function NetworkVisualizer({
         y,
         type: 'input'
       });
-    });
+    }
 
     // Hidden and output layers
     let prevNodes = nodes.slice();
     mlp.layers.forEach((layer, layerIdx) => {
       const layerNum = layerIdx + 1;
-      const currentNodes: any[] = [];
+      const currentNodes: NodeData[] = [];
       const isOutput = layerNum === numLayers - 1;
 
       layer.neurons.forEach((neuron, neuronIdx) => {
@@ -57,18 +69,20 @@ export function NetworkVisualizer({
         const y = height / 2 + (neuronIdx - (layerSize - 1) / 2) * 60;
         const nodeId = `L${layerNum}-${neuronIdx}`;
 
-        currentNodes.push({
+        const targetNode: NodeData = {
           id: nodeId,
           x: layerX(layerNum),
           y,
           type: isOutput ? 'output' : 'hidden'
-        });
+        };
+
+        currentNodes.push(targetNode);
 
         // Create edges
         neuron.w.forEach((weight, wIdx) => {
           edges.push({
             source: prevNodes[wIdx],
-            target: { id: nodeId, x: layerX(layerNum), y },
+            target: targetNode,
             weight: weight.data
           });
         });
@@ -115,7 +129,7 @@ export function NetworkVisualizer({
       .attr('cy', d => d.y)
       .attr('r', 18)
       .attr('fill', 'white')
-      .attr('stroke', d => nodeColors[d.type as keyof typeof nodeColors])
+      .attr('stroke', d => nodeColors[d.type])
       .attr('stroke-width', 2.5);
 
   }, [mlp, inputs, width, height]);

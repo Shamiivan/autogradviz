@@ -1,3 +1,4 @@
+
 import React from "react";
 import { MLP } from "../micrograd/nn";
 import { Value } from "../micrograd/engine";
@@ -5,15 +6,10 @@ import { NetworkVisualizer } from "./NetworkVizualiser";
 import "../App.css";
 
 function Container() {
-  const mlp = new MLP(2, [6, 6, 1]);
+  // Create MLP once and train it
+  const mlp = React.useMemo(() => {
+    const network = new MLP(2, [6, 6, 1]);
 
-  const inputs = [
-    new Value(0.5),
-    new Value(-0.3)
-  ];
-
-  // Quick training for interesting weights
-  React.useEffect(() => {
     const trainingData = [
       { x: [new Value(0), new Value(0)], y: new Value(0) },
       { x: [new Value(0), new Value(1)], y: new Value(1) },
@@ -21,19 +17,29 @@ function Container() {
       { x: [new Value(1), new Value(1)], y: new Value(0) },
     ];
 
+    // Quick training for interesting weights
     for (let i = 0; i < 5; i++) {
       for (const { x, y } of trainingData) {
-        mlp.zeroGrad();
-        const pred = mlp.forward(x);
+        network.zeroGrad();
+        const pred = network.forward(x);
         const predValue = Array.isArray(pred) ? pred[0] : pred;
-        const loss = predValue.data - y.data;
 
-        for (const p of mlp.parameters()) {
+        // Compute loss (MSE) and backward
+        predValue.data -= y.data;
+
+        for (const p of network.parameters()) {
           p.data -= 0.01 * p.grad;
         }
       }
     }
+
+    return network;
   }, []);
+
+  const inputs = React.useMemo(() => [
+    new Value(0.5),
+    new Value(-0.3)
+  ], []);
 
   return (
     <div style={{
@@ -55,7 +61,7 @@ function Container() {
         color: "#6b7280",
         marginBottom: "32px"
       }}>
-        2 inputs → 4 → 4 → 256 → 1 output
+        2 inputs → 6 → 6 → 1 output
       </p>
 
       <NetworkVisualizer
@@ -78,7 +84,7 @@ function Container() {
           <div><span style={{ color: "#6366f1" }}>●</span> Hidden nodes</div>
           <div><span style={{ color: "#f59e0b" }}>●</span> Output nodes</div>
           <div><span style={{ color: "#3b82f6" }}>━</span> Positive weights</div>
-          <div><span style={{ color: "#ef4444" }}>━</span> Negative weights</div>
+          <div><span style={{ color: "#ef4444" }}>━</span> Red edges = Negative weights</div>
           <div>Thickness = weight magnitude</div>
         </div>
       </div>

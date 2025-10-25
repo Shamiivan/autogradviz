@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { Neuron, Layer, MLP } from "../src/micrograd/nn";
 import { Value, add, mul } from "../src/micrograd/engine";
 
