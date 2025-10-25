@@ -5,9 +5,9 @@ function App() {
 
   return (
     <>
-      <h1>Auto grad viz
+      <h6>Auto grad viz
         <span> - A tool for visualizing automatic differentiation</span>
-      </h1>
+      </h6>
       <div className="card">
         <Circle x={100} y={100} radius={40} color="blue" numberOfCircles={5} />
       </div>
