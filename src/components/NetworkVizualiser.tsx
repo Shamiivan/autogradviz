@@ -449,16 +449,36 @@ export function NetworkVisualizer({
             const outgoingEdges = edges.filter(e => e.source.layerIndex === layerIndex);
 
             outgoingEdges.forEach(edge => {
-              svg.select(`.edge-${edge.source.id}-${edge.target.id}`)
+              const baseStroke = edge.weight >= 0 ? '#3b82f6' : '#ef4444';
+              const edgeSelection = svg.select(`.edge-${edge.source.id}-${edge.target.id}`);
+              const targetLayerIdx = edge.target.layerIndex - 1;
+              const targetGradient = targetLayerIdx >= 0
+                ? Math.abs(currentSnapshot.gradients[targetLayerIdx]?.[edge.target.neuronIndex] ?? 0)
+                : 0;
+              const gradientWidth = targetGradient > 0
+                ? 2.5 + Math.min(targetGradient, 1.5) * 2
+                : widthScale(Math.abs(edge.weight));
+
+              edgeSelection
+                .attr('stroke-dasharray', '8 12')
+                .attr('stroke-dashoffset', 0)
                 .transition()
                 .duration(150)
                 .delay(delay)
-                .attr('stroke', '#f97316') // Orange for backward pass
+                .attr('stroke', '#f97316')
+                .attr('stroke-width', gradientWidth)
                 .attr('opacity', 0.9)
                 .transition()
+                .duration(320)
+                .ease(d3.easeLinear)
+                .attr('stroke-dashoffset', -24)
+                .transition()
                 .duration(150)
-                .attr('stroke', () => edge.weight >= 0 ? '#3b82f6' : '#ef4444')
-                .attr('opacity', 0.6);
+                .attr('stroke', baseStroke)
+                .attr('stroke-width', widthScale(Math.abs(edge.weight)))
+                .attr('opacity', 0.6)
+                .attr('stroke-dasharray', null)
+                .attr('stroke-dashoffset', null);
             });
           }
 
@@ -473,6 +493,9 @@ export function NetworkVisualizer({
 
             const gradFillColor = gradientColorScale(gradient);
             const gradStrokeColor = gradientBorderScale(gradient);
+            const gradStrokeWidth = gradient >= GRADIENT_THRESHOLD
+              ? 2.5 + Math.min(gradient, 1.5) * 1.5
+              : 2.5;
 
             // SHRINK for high gradient - opposite of forward pass
             const scale = gradient >= GRADIENT_THRESHOLD ? 1 - (Math.min(gradient, 1.0) * 0.3) : 1.0;
@@ -483,6 +506,7 @@ export function NetworkVisualizer({
               .delay(delay + 100)
               .attr('fill', gradFillColor)
               .attr('stroke', gradStrokeColor)
+              .attr('stroke-width', gradStrokeWidth)
               .attr('r', 18 * scale); // SHRINK for high gradient
 
             // Show gradient value
@@ -537,7 +561,16 @@ export function NetworkVisualizer({
                 // Reset opacity
                 .transition()
                 .duration(200)
-                .attr('opacity', 0.6);
+                .attr('opacity', 0.6)
+                .attr('stroke-dasharray', null)
+                .attr('stroke-dashoffset', null);
+            } else {
+              svg.select(`.edge-${edge.source.id}-${edge.target.id}`)
+                .attr('stroke', newWeight >= 0 ? '#3b82f6' : '#ef4444')
+                .attr('stroke-width', newThickness)
+                .attr('opacity', 0.6)
+                .attr('stroke-dasharray', null)
+                .attr('stroke-dashoffset', null);
             }
           });
 
@@ -549,6 +582,7 @@ export function NetworkVisualizer({
                 .duration(150)
                 .attr('fill', 'white')
                 .attr('stroke', '#9ca3af')
+                .attr('stroke-width', 2.5)
                 .attr('r', 18); // Reset size
 
               svg.select(`.node-${node.id}`).select('.node-label')

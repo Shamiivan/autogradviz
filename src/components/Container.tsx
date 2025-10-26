@@ -1,7 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, type CSSProperties } from "react";
 import { TrainingManager } from "../micrograd/training";
 import type { TrainingSnapshot } from "../micrograd/types";
 import { NetworkVisualizer } from "./NetworkVizualiser";
+import { FeatureScatter } from "./FeatureScatter";
+import { LegendOverlay } from "./LegendOverlay";
 import { IRIS_CLASS_NAMES, IRIS_FEATURE_NAMES } from "../utils";
 import { MetricsChart, type MetricsPoint } from "./MetricsChart";
 
@@ -15,10 +17,13 @@ function Container() {
   const [animationTrigger, setAnimationTrigger] = useState(0);
   const [maxEpochs, setMaxEpochs] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [viewportWidth, setViewportWidth] = useState(
     typeof window !== "undefined" ? window.innerWidth : 1024
   );
   const isMobile = viewportWidth < 768;
+  const ANIMATION_PAUSE_MESSAGE = "Training paused for visualization – press Resume to continue";
+  const MANUAL_PAUSE_MESSAGE = "Training paused – press Resume to continue";
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -58,6 +63,7 @@ function Container() {
   const handleStartTraining = async () => {
     if (!trainingManager || isTraining) return;
 
+    setStatusMessage(null);
     setSnapshots([]);
     setCurrentEpoch(0);
     setIsPaused(false);
@@ -88,6 +94,7 @@ function Container() {
       unsubscribe();
       setIsTraining(false);
       setIsPaused(false);
+      setStatusMessage(null);
     }
   };
 
@@ -95,21 +102,24 @@ function Container() {
     if (!trainingManager || !isTraining || isPaused) return;
     trainingManager.pause();
     setIsPaused(true);
+    setStatusMessage(MANUAL_PAUSE_MESSAGE);
   };
 
   const handleResumeTraining = () => {
     if (!trainingManager || !isTraining || !isPaused) return;
     trainingManager.resume();
     setIsPaused(false);
+    setStatusMessage(null);
   };
 
   // Play animation for current epoch
   const handlePlayAnimation = () => {
     if (snapshots.length === 0 || isAnimating) return;
 
-    if (trainingManager && isTraining) {
-      trainingManager.stop();
-      setIsPaused(false);
+    if (trainingManager && isTraining && !isPaused) {
+      trainingManager.pause();
+      setIsPaused(true);
+      setStatusMessage(ANIMATION_PAUSE_MESSAGE);
     }
 
     setIsAnimating(true);
@@ -197,10 +207,49 @@ function Container() {
     });
   }, [snapshots]);
 
+  const trainSamples = useMemo(() => trainingManager ? trainingManager.getTrainData() : [], [trainingManager]);
+
   const vizWidth = Math.max((isMobile ? viewportWidth - 32 : 900), 320);
   const vizHeight = isMobile ? 420 : 500;
   const metricsWidth = Math.max((isMobile ? viewportWidth - 32 : 860), 320);
   const metricsHeight = isMobile ? 220 : 260;
+  const scatterWidth = isMobile ? vizWidth : 240;
+  const scatterHeight = isMobile ? 200 : 220;
+
+  const controlWrapperStyle: CSSProperties = {
+    marginBottom: isMobile ? "28px" : "32px",
+    position: isMobile ? "sticky" : "static",
+    top: isMobile ? "16px" : undefined,
+    zIndex: isMobile ? 30 : undefined,
+    background: isMobile ? "rgba(249, 250, 251, 0.95)" : "transparent",
+    backdropFilter: isMobile ? "blur(8px)" : undefined,
+    borderRadius: isMobile ? "16px" : undefined,
+    padding: isMobile ? "12px" : undefined,
+    boxShadow: isMobile ? "0 12px 24px rgba(15, 23, 42, 0.12)" : "none"
+  };
+
+  const buttonRowStyle: CSSProperties = {
+    display: "flex",
+    gap: isMobile ? "12px" : "16px",
+    alignItems: isMobile ? "stretch" : "center",
+    flexWrap: "wrap",
+    flexDirection: isMobile ? "column" : "row",
+    width: "100%"
+  };
+
+  const statusBadgeStyle: CSSProperties = {
+    marginTop: isMobile ? "10px" : "12px",
+    background: "#e0e7ff",
+    border: "1px solid #c7d2fe",
+    color: "#1d4ed8",
+    fontSize: "13px",
+    borderRadius: "10px",
+    padding: "10px 14px",
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    boxShadow: "0 8px 16px rgba(59, 130, 246, 0.15)"
+  };
 
   if (isLoading) {
     return (
@@ -240,118 +289,120 @@ function Container() {
       </p>
 
       {/* Controls */}
-      <div style={{
-        marginBottom: isMobile ? "24px" : "32px",
-        display: "flex",
-        gap: isMobile ? "12px" : "16px",
-        alignItems: isMobile ? "stretch" : "center",
-        flexWrap: "wrap",
-        flexDirection: isMobile ? "column" : "row",
-        width: "100%"
-      }}>
-        <button
-          onClick={handleStartTraining}
-          disabled={isTraining}
-          style={{
-            padding: "12px 24px",
-            fontSize: "16px",
-            fontWeight: "600",
-            color: "white",
-            background: isTraining ? "#9ca3af" : "#3b82f6",
-            border: "none",
-            borderRadius: "8px",
-            cursor: isTraining ? "not-allowed" : "pointer",
-            transition: "background 0.2s",
-            width: isMobile ? "100%" : "auto"
-          }}
-        >
-          {isTraining ? "Training..." : "Start Training"}
-        </button>
-
-        {isTraining && (
+      <div style={controlWrapperStyle}>
+        <div style={buttonRowStyle}>
           <button
-            onClick={isPaused ? handleResumeTraining : handlePauseTraining}
+            onClick={handleStartTraining}
+            disabled={isTraining}
             style={{
               padding: "12px 24px",
               fontSize: "16px",
               fontWeight: "600",
               color: "white",
-              background: isPaused ? "#10b981" : "#f97316",
+              background: isTraining ? "#9ca3af" : "#3b82f6",
               border: "none",
               borderRadius: "8px",
-              cursor: "pointer",
+              cursor: isTraining ? "not-allowed" : "pointer",
               transition: "background 0.2s",
               width: isMobile ? "100%" : "auto"
             }}
           >
-            {isPaused ? "Resume Training" : "Pause Training"}
+            {isTraining ? "Training..." : "Start Training"}
           </button>
-        )}
 
-        {snapshots.length > 0 && (
-          <>
+          {isTraining && (
             <button
-              onClick={handlePrevEpoch}
-              disabled={currentEpoch === 0}
-              style={{
-                padding: "12px 24px",
-                fontSize: "16px",
-                fontWeight: "600",
-                color: "#374151",
-                background: currentEpoch === 0 ? "#e5e7eb" : "white",
-                border: "2px solid #d1d5db",
-                borderRadius: "8px",
-                cursor: currentEpoch === 0 ? "not-allowed" : "pointer",
-                width: isMobile ? "100%" : "auto"
-              }}
-            >
-              ← Previous Epoch
-            </button>
-
-            <button
-              onClick={handlePlayAnimation}
+              onClick={isPaused ? handleResumeTraining : handlePauseTraining}
               disabled={isAnimating}
               style={{
                 padding: "12px 24px",
                 fontSize: "16px",
                 fontWeight: "600",
                 color: "white",
-                background: isAnimating ? "#9ca3af" : "#10b981",
+                background: isPaused ? "#10b981" : "#f97316",
                 border: "none",
                 borderRadius: "8px",
                 cursor: isAnimating ? "not-allowed" : "pointer",
+                transition: "background 0.2s",
                 width: isMobile ? "100%" : "auto"
               }}
             >
-              {isAnimating ? "Animating..." : "▶️ Animate Epoch"}
+              {isPaused ? "Resume Training" : "Pause Training"}
             </button>
+          )}
 
-            <button
-              onClick={handleNextEpoch}
-              disabled={currentEpoch === maxEpochs - 1}
-              style={{
-                padding: "12px 24px",
-                fontSize: "16px",
-                fontWeight: "600",
-                color: "#374151",
-                background: currentEpoch === maxEpochs - 1 ? "#e5e7eb" : "white",
-                border: "2px solid #d1d5db",
-                borderRadius: "8px",
-                cursor: currentEpoch === maxEpochs - 1 ? "not-allowed" : "pointer",
-                width: isMobile ? "100%" : "auto"
-              }}
-            >
-              Next Epoch →
-            </button>
+          {snapshots.length > 0 && (
+            <>
+              <button
+                onClick={handlePrevEpoch}
+                disabled={currentEpoch === 0}
+                style={{
+                  padding: "12px 24px",
+                  fontSize: "16px",
+                  fontWeight: "600",
+                  color: "#374151",
+                  background: currentEpoch === 0 ? "#e5e7eb" : "white",
+                  border: "2px solid #d1d5db",
+                  borderRadius: "8px",
+                  cursor: currentEpoch === 0 ? "not-allowed" : "pointer",
+                  width: isMobile ? "100%" : "auto"
+                }}
+              >
+                ← Previous Epoch
+              </button>
 
-            <div style={{
-              fontSize: "14px",
-              color: "#6b7280",
-              alignSelf: isMobile ? "flex-start" : "center"
-            }}>
-              Epoch {currentEpoch + 1} / {maxEpochs}
-            </div>
-          </>
+              <button
+                onClick={handlePlayAnimation}
+                disabled={isAnimating}
+                style={{
+                  padding: "12px 24px",
+                  fontSize: "16px",
+                  fontWeight: "600",
+                  color: "white",
+                  background: isAnimating ? "#9ca3af" : "#10b981",
+                  border: "none",
+                  borderRadius: "8px",
+                  cursor: isAnimating ? "not-allowed" : "pointer",
+                  width: isMobile ? "100%" : "auto"
+                }}
+              >
+                {isAnimating ? "Animating..." : "▶️ Animate Epoch"}
+              </button>
+
+              <button
+                onClick={handleNextEpoch}
+                disabled={currentEpoch === maxEpochs - 1}
+                style={{
+                  padding: "12px 24px",
+                  fontSize: "16px",
+                  fontWeight: "600",
+                  color: "#374151",
+                  background: currentEpoch === maxEpochs - 1 ? "#e5e7eb" : "white",
+                  border: "2px solid #d1d5db",
+                  borderRadius: "8px",
+                  cursor: currentEpoch === maxEpochs - 1 ? "not-allowed" : "pointer",
+                  width: isMobile ? "100%" : "auto"
+                }}
+              >
+                Next Epoch →
+              </button>
+
+              <div style={{
+                fontSize: "14px",
+                color: "#6b7280",
+                alignSelf: isMobile ? "flex-start" : "center"
+              }}>
+                Epoch {currentEpoch + 1} / {maxEpochs}
+              </div>
+            </>
+          )}
+        </div>
+
+        {statusMessage && (
+          <div style={statusBadgeStyle}>
+            <span role="img" aria-hidden="true">ℹ️</span>
+            <span>{statusMessage}</span>
+          </div>
         )}
       </div>
 
@@ -365,136 +416,42 @@ function Container() {
           background: "#f9fafb",
           overflowX: "auto"
         }}>
-          <NetworkVisualizer
-            mlp={trainingManager.getNetwork()}
-            inputs={trainingManager.getTrainData()[0]?.inputs || []}
-            snapshot={getCurrentSnapshot()}
-            width={vizWidth}
-            height={vizHeight}
-            animate={isAnimating}
-            onAnimationComplete={handleAnimationComplete}
-            key={`${currentEpoch}-${animationTrigger}`}
-            epochSnapshots={getCurrentEpochSnapshots()}
-          />
-
-          {/* Color Legend */}
-          {snapshots.length > 0 && (
-            <div style={{
-              marginTop: "16px",
-              display: "flex",
-              flexDirection: "column",
-              gap: isMobile ? "16px" : "12px",
-              alignItems: "center"
-            }}>
-              {/* Forward Pass Legend */}
-              <div style={{
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                gap: isMobile ? "12px" : "20px",
-                fontSize: isMobile ? "12px" : "13px",
-                color: "#6b7280",
-                flexWrap: "wrap",
-                rowGap: "8px"
-              }}>
-                <div style={{ fontWeight: "600", color: "#3b82f6" }}>Forward Pass:</div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <div style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    background: "white",
-                    border: "2px solid #9ca3af"
-                  }}></div>
-                  <span>&lt; 0.3</span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <div style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    background: "#ef4444",
-                    border: "2px solid #991b1b"
-                  }}></div>
-                  <span>0.3-0.5</span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <div style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    background: "#eab308",
-                    border: "2px solid #a16207"
-                  }}></div>
-                  <span>0.5-0.7</span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <div style={{
-                    width: "24px",
-                    height: "24px",
-                    borderRadius: "50%",
-                    background: "#10b981",
-                    border: "2px solid #047857"
-                  }}></div>
-                  <span>&gt; 0.7 (Grows)</span>
-                </div>
-              </div>
-
-              {/* Backward Pass Legend */}
-              <div style={{
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-                gap: isMobile ? "12px" : "20px",
-                fontSize: isMobile ? "12px" : "13px",
-                color: "#6b7280",
-                flexWrap: "wrap",
-                rowGap: "8px"
-              }}>
-                <div style={{ fontWeight: "600", color: "#f97316" }}>Backward Pass:</div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <div style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    background: "white",
-                    border: "2px solid #9ca3af"
-                  }}></div>
-                  <span>&lt; 0.01</span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <div style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    background: "#f9a8d4",
-                    border: "2px solid #be185d"
-                  }}></div>
-                  <span>0.01-0.5</span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <div style={{
-                    width: "20px",
-                    height: "20px",
-                    borderRadius: "50%",
-                    background: "#ec4899",
-                    border: "2px solid #be185d"
-                  }}></div>
-                  <span>0.5-1.0</span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <div style={{
-                    width: "16px",
-                    height: "16px",
-                    borderRadius: "50%",
-                    background: "#9333ea",
-                    border: "2px solid #6b21a8"
-                  }}></div>
-                  <span>&gt; 1.0 (Shrinks)</span>
-                </div>
-              </div>
+          <div style={{
+            display: "flex",
+            flexDirection: isMobile ? "column" : "row",
+            gap: isMobile ? "16px" : "24px",
+            alignItems: "stretch"
+          }}>
+            <div style={{ position: "relative", flex: "1 1 auto", minWidth: 0 }}>
+              <NetworkVisualizer
+                mlp={trainingManager.getNetwork()}
+                inputs={trainSamples[0]?.inputs || []}
+                snapshot={getCurrentSnapshot()}
+                width={vizWidth}
+                height={vizHeight}
+                animate={isAnimating}
+                onAnimationComplete={handleAnimationComplete}
+                key={`${currentEpoch}-${animationTrigger}`}
+                epochSnapshots={getCurrentEpochSnapshots()}
+              />
+              <LegendOverlay />
             </div>
-          )}
+            {trainSamples.length > 0 && (
+              <div style={{
+                flex: isMobile ? "0 0 auto" : "0 0 240px",
+                display: "flex",
+                justifyContent: "center"
+              }}>
+                <FeatureScatter
+                  samples={trainSamples}
+                  currentSample={currentSnapshot?.sample}
+                  width={scatterWidth}
+                  height={scatterHeight}
+                />
+              </div>
+            )}
+          </div>
+
 
           {passMetrics.length > 0 && (
             <div style={{
