@@ -12,7 +12,7 @@ function Container() {
   // Initialize training manager and load data
   useEffect(() => {
     const initTraining = async () => {
-      console.log("🎬 Initializing training system...");
+      console.log("Initializing training system...");
 
       // Create training manager with config
       const manager = new TrainingManager({
@@ -27,7 +27,7 @@ function Container() {
       setTrainingManager(manager);
       setIsLoading(false);
 
-      console.log("✅ System ready! Click 'Start Training' to begin.");
+      console.log("System ready! Click 'Start Training' to begin.");
     };
 
     initTraining();
@@ -50,13 +50,13 @@ function Container() {
     console.log("=".repeat(50) + "\n");
 
     // Log summary
-    console.log("📈 Training Summary:");
+    console.log("Training Summary:");
     console.log(`   Total steps: ${allSnapshots.length}`);
     console.log(`   Initial loss: ${allSnapshots[0]?.loss.toFixed(4)}`);
     console.log(`   Final loss: ${allSnapshots[allSnapshots.length - 1]?.loss.toFixed(4)}`);
 
     // Log first few snapshots as examples
-    console.log("\n📸 Sample Snapshots:");
+    console.log("\n Sample Snapshots:");
     allSnapshots.slice(0, 3).forEach(snap => {
       console.log(`   Step ${snap.step}: Loss=${snap.loss.toFixed(4)}, ` +
         `Pred=${snap.prediction}, Actual=${snap.actualClass}, ` +
@@ -133,7 +133,7 @@ function Container() {
             fontSize: "14px",
             color: "#6b7280"
           }}>
-            ✅ Captured {snapshots.length} snapshots
+            Captured {snapshots.length} snapshots
           </div>
         )}
       </div>
@@ -165,7 +165,7 @@ function Container() {
         border: "1px solid #bfdbfe"
       }}>
         <div style={{ fontWeight: "600", marginBottom: "8px", color: "#1e40af" }}>
-          📋 Instructions:
+          Instructions:
         </div>
         <ol style={{ margin: 0, paddingLeft: "20px", color: "#1e40af" }}>
           <li>Open your browser's Developer Console (F12)</li>
