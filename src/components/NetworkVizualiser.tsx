@@ -293,7 +293,7 @@ export function NetworkVisualizer({
 
     // Add descriptor labels for inputs (left side)
     nodeGroup
-      .filter(d => d.type === 'input' && d.label)
+      .filter(d => d.type === 'input' && Boolean(d.label))
       .append('text')
       .attr('x', d => d.x - 28)
       .attr('y', d => d.y)

@@ -31,4 +31,5 @@ export interface TrainingConfig {
   epochs: number;
   learningRate: number;
   trainTestSplit: number; // e.g., 0.8 for 80% train
+  stepDelayMs?: number; // optional delay between samples for UI updates
 }

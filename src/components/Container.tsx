@@ -1,8 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { TrainingManager } from "../micrograd/training";
 import type { TrainingSnapshot } from "../micrograd/types";
 import { NetworkVisualizer } from "./NetworkVizualiser";
 import { IRIS_CLASS_NAMES, IRIS_FEATURE_NAMES } from "../utils";
+import { MetricsChart, type EpochMetric } from "./MetricsChart";
 
 function Container() {
   const [trainingManager, setTrainingManager] = useState<TrainingManager | null>(null);
@@ -30,7 +31,7 @@ function Container() {
       await manager.loadData();
 
       setTrainingManager(manager);
-      setMaxEpochs(10);
+      setMaxEpochs(manager.getTotalEpochs());
       setIsLoading(false);
 
       console.log("System ready! Click 'Start Training' to begin.");
@@ -43,26 +44,34 @@ function Container() {
   const handleStartTraining = async () => {
     if (!trainingManager || isTraining) return;
 
+    setSnapshots([]);
+    setCurrentEpoch(0);
+    trainingManager.clearSnapshots();
+
+    const unsubscribe = trainingManager.onSnapshot(snapshot => {
+      setSnapshots(prev => [...prev, snapshot]);
+    });
+
     setIsTraining(true);
     console.log("\n" + "=".repeat(50));
 
-    // Train the network
-    await trainingManager.train();
+    try {
+      // Train the network
+      await trainingManager.train();
 
-    // Get all snapshots
-    const allSnapshots = trainingManager.getSnapshots();
-    setSnapshots(allSnapshots);
-    setCurrentEpoch(0);
+      const allSnapshots = trainingManager.getSnapshots();
 
-    console.log("=".repeat(50) + "\n");
+      console.log("=".repeat(50) + "\n");
 
-    // Log summary
-    console.log("Training Summary:");
-    console.log(`   Total steps: ${allSnapshots.length}`);
-    console.log(`   Initial loss: ${allSnapshots[0]?.loss.toFixed(4)}`);
-    console.log(`   Final loss: ${allSnapshots[allSnapshots.length - 1]?.loss.toFixed(4)}`);
-
-    setIsTraining(false);
+      // Log summary
+      console.log("Training Summary:");
+      console.log(`   Total steps: ${allSnapshots.length}`);
+      console.log(`   Initial loss: ${allSnapshots[0]?.loss.toFixed(4)}`);
+      console.log(`   Final loss: ${allSnapshots[allSnapshots.length - 1]?.loss.toFixed(4)}`);
+    } finally {
+      unsubscribe();
+      setIsTraining(false);
+    }
   };
 
   // Play animation for current epoch
@@ -129,6 +138,32 @@ function Container() {
     value,
     idx
   }));
+
+  const epochMetrics = useMemo<EpochMetric[]>(() => {
+    if (snapshots.length === 0) {
+      return [];
+    }
+
+    const aggregates = new Map<number, { lossSum: number; correct: number; count: number }>();
+
+    snapshots.forEach(snapshot => {
+      const entry = aggregates.get(snapshot.epoch) ?? { lossSum: 0, correct: 0, count: 0 };
+      entry.lossSum += snapshot.loss;
+      entry.count += 1;
+      if (snapshot.prediction === snapshot.actualClass) {
+        entry.correct += 1;
+      }
+      aggregates.set(snapshot.epoch, entry);
+    });
+
+    return Array.from(aggregates.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([epoch, { lossSum, count, correct }]) => ({
+        epoch,
+        avgLoss: count > 0 ? lossSum / count : 0,
+        accuracy: count > 0 ? correct / count : 0
+      }));
+  }, [snapshots]);
 
   if (isLoading) {
     return (
@@ -392,6 +427,26 @@ function Container() {
             </div>
           )}
 
+          {epochMetrics.length > 0 && (
+            <div style={{
+              marginTop: "32px",
+              padding: "16px",
+              background: "#ffffff",
+              borderRadius: "8px",
+              border: "1px solid #e5e7eb"
+            }}>
+              <div style={{
+                fontWeight: 600,
+                fontSize: "15px",
+                color: "#111827",
+                marginBottom: "12px"
+              }}>
+                Training Metrics by Epoch
+              </div>
+              <MetricsChart metrics={epochMetrics} />
+            </div>
+          )}
+
           {snapshots.length > 0 && currentSnapshot && (
             <>
               <div style={{
@@ -432,34 +487,30 @@ function Container() {
                     <div style={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>
                       Inputs
                     </div>
-                    {IRIS_FEATURE_NAMES.map((feature, idx) => {
-                      const value = currentSnapshot.activations[0]?.[idx] ?? 0;
-                      return (
-                        <div
-                          key={feature}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            padding: "8px 12px",
-                            background: "#f9fafb",
-                            borderRadius: "6px",
-                            border: "1px solid #e5e7eb",
-                            fontSize: "13px"
-                          }}
-                        >
-                          <span>{feature}</span>
-                          <span style={{ fontVariantNumeric: "tabular-nums" }}>{value.toFixed(2)}</span>
-                        </div>
-                      );
-                    })}
+                    {labeledInputs.map(({ label, value }) => (
+                      <div
+                        key={label}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          padding: "8px 12px",
+                          background: "#f9fafb",
+                          borderRadius: "6px",
+                          border: "1px solid #e5e7eb",
+                          fontSize: "13px"
+                        }}
+                      >
+                        <span>{label}</span>
+                        <span style={{ fontVariantNumeric: "tabular-nums" }}>{value.toFixed(2)}</span>
+                      </div>
+                    ))}
                   </div>
 
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     <div style={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>
                       Output predictions
                     </div>
-                    {IRIS_CLASS_NAMES.map((label, idx) => {
-                      const value = currentSnapshot.activations[currentSnapshot.activations.length - 1]?.[idx] ?? 0;
+                    {labeledOutputs.map(({ label, value, idx }) => {
                       const isPrediction = currentSnapshot.prediction === idx;
                       const isTarget = currentSnapshot.actualClass === idx;
                       const background = isPrediction && isTarget

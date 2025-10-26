@@ -12,11 +12,14 @@ export class TrainingManager {
   private trainData: IrisSample[] = [];
   private testData: IrisSample[] = [];
   private config: TrainingConfig;
+  private readonly stepDelayMs: number;
   private snapshots: TrainingSnapshot[] = [];
   private currentStep = 0;
+  private snapshotListeners: Array<(snapshot: TrainingSnapshot) => void> = [];
 
   constructor(config: TrainingConfig) {
-    this.config = config;
+    this.config = { ...config };
+    this.stepDelayMs = config.stepDelayMs ?? 0;
     // Create MLP: 4 inputs (iris features) -> hidden layers -> 3 outputs (classes)
     this.mlp = new MLP(4, [8, 8, 3]);
     console.log("🧠 Neural Network created: 4 → 8 → 8 → 3");
@@ -43,7 +46,7 @@ export class TrainingManager {
   /**
    * Train for one epoch and capture snapshots
    */
-  trainEpoch(epoch: number): void {
+  async trainEpoch(epoch: number): Promise<void> {
     console.log(`\n🔄 Epoch ${epoch + 1}/${this.config.epochs}`);
 
     let epochLoss = 0;
@@ -100,6 +103,8 @@ export class TrainingManager {
 
       // Add snapshot AFTER we have gradients and weight deltas
       this.snapshots.push(snapshot);
+      this.emitSnapshot(snapshot);
+      await this.yieldForVisualization();
     }
 
     const avgLoss = epochLoss / this.trainData.length;
@@ -190,7 +195,7 @@ export class TrainingManager {
     console.log(`   Config: ${this.config.epochs} epochs, lr=${this.config.learningRate}`);
 
     for (let epoch = 0; epoch < this.config.epochs; epoch++) {
-      this.trainEpoch(epoch);
+      await this.trainEpoch(epoch);
     }
 
     console.log("\n✅ Training complete!");
@@ -223,5 +228,44 @@ export class TrainingManager {
    */
   getTestData(): IrisSample[] {
     return this.testData;
+  }
+
+  /**
+   * Subscribe to snapshots emitted during training
+   */
+  onSnapshot(listener: (snapshot: TrainingSnapshot) => void): () => void {
+    this.snapshotListeners.push(listener);
+    return () => {
+      this.snapshotListeners = this.snapshotListeners.filter(l => l !== listener);
+    };
+  }
+
+  /**
+   * Get configured epoch count
+   */
+  getTotalEpochs(): number {
+    return this.config.epochs;
+  }
+
+  /**
+   * Remove all captured snapshots (e.g., before a new training run)
+   */
+  clearSnapshots(): void {
+    this.snapshots = [];
+    this.currentStep = 0;
+  }
+
+  private emitSnapshot(snapshot: TrainingSnapshot): void {
+    for (const listener of this.snapshotListeners) {
+      listener(snapshot);
+    }
+  }
+
+  private async yieldForVisualization(): Promise<void> {
+    if (this.snapshotListeners.length === 0) {
+      return;
+    }
+    const delay = Math.max(0, this.stepDelayMs);
+    await new Promise<void>(resolve => setTimeout(resolve, delay));
   }
 }
