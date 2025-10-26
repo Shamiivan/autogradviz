@@ -3,6 +3,7 @@ import * as d3 from 'd3';
 import { MLP } from '../micrograd/nn';
 import { Value } from '../micrograd/engine';
 import type { TrainingSnapshot } from '../micrograd/types';
+import { IRIS_CLASS_NAMES, IRIS_FEATURE_NAMES } from '../utils';
 
 interface NetworkVisualizerProps {
   mlp: MLP;
@@ -23,6 +24,7 @@ interface NodeData {
   activation?: number; // Activation value for coloring
   layerIndex: number;
   neuronIndex: number;
+  label?: string;
 }
 
 interface EdgeData {
@@ -111,7 +113,8 @@ export function NetworkVisualizer({
         type: 'input',
         activation,
         layerIndex: 0,
-        neuronIndex: i
+        neuronIndex: i,
+        label: IRIS_FEATURE_NAMES[i] ?? `Feature ${i + 1}`
       });
     }
 
@@ -137,7 +140,8 @@ export function NetworkVisualizer({
           type: isOutput ? 'output' : 'hidden',
           activation,
           layerIndex: layerNum,
-          neuronIndex: neuronIdx
+          neuronIndex: neuronIdx,
+          label: isOutput ? (IRIS_CLASS_NAMES[neuronIdx] ?? `Class ${neuronIdx + 1}`) : undefined
         };
 
         currentNodes.push(targetNode);
@@ -155,6 +159,45 @@ export function NetworkVisualizer({
       prevNodes = currentNodes;
       nodes.push(...currentNodes);
     });
+
+    const inputNodes = nodes.filter(n => n.type === 'input');
+    const outputNodes = nodes.filter(n => n.type === 'output');
+    const outputLayerIndex = numLayers - 1;
+
+    const formatInputLabel = (node: NodeData, value?: number) => {
+      const base = node.label ?? `Input ${node.neuronIndex + 1}`;
+      if (value === undefined) {
+        return base;
+      }
+      return `${base}: ${value.toFixed(2)}`;
+    };
+
+    const formatOutputLabel = (
+      node: NodeData,
+      value: number | undefined,
+      snap?: TrainingSnapshot
+    ) => {
+      const pieces: string[] = [];
+      pieces.push(node.label ?? `Output ${node.neuronIndex + 1}`);
+      if (value !== undefined) {
+        pieces.push(value.toFixed(2));
+      }
+      if (snap) {
+        const isPrediction = snap.prediction === node.neuronIndex;
+        const isTarget = snap.actualClass === node.neuronIndex;
+        if (isPrediction && isTarget) {
+          pieces.push("prediction ✓");
+        } else {
+          if (isPrediction) {
+            pieces.push("prediction");
+          }
+          if (isTarget) {
+            pieces.push("target");
+          }
+        }
+      }
+      return pieces.join(" • ");
+    };
 
     // Calculate weight scale
     const maxWeight = Math.max(...edges.map(e => Math.abs(e.weight)));
@@ -248,6 +291,57 @@ export function NetworkVisualizer({
       .text(d => d.activation !== undefined ? d.activation.toFixed(2) : '')
       .style('opacity', 0);
 
+    // Add descriptor labels for inputs (left side)
+    nodeGroup
+      .filter(d => d.type === 'input' && d.label)
+      .append('text')
+      .attr('x', d => d.x - 28)
+      .attr('y', d => d.y)
+      .attr('text-anchor', 'end')
+      .attr('dominant-baseline', 'middle')
+      .attr('font-size', '11px')
+      .attr('fill', '#1f2937')
+      .attr('pointer-events', 'none')
+      .attr('class', 'node-feature-label')
+      .text(d => formatInputLabel(d, d.activation));
+
+    // Add descriptor labels for outputs (right side)
+    nodeGroup
+      .filter(d => d.type === 'output')
+      .append('text')
+      .attr('x', d => d.x + 28)
+      .attr('y', d => d.y)
+      .attr('text-anchor', 'start')
+      .attr('dominant-baseline', 'middle')
+      .attr('font-size', '11px')
+      .attr('fill', '#1f2937')
+      .attr('pointer-events', 'none')
+      .attr('class', 'node-output-label')
+      .text(d => formatOutputLabel(
+        d,
+        snapshot ? snapshot.activations[outputLayerIndex][d.neuronIndex] : d.activation,
+        snapshot
+      ));
+
+    const updateNodeDescriptorText = (snap: TrainingSnapshot) => {
+      const inputActivations = snap.activations[0] || [];
+      const outputActivations = snap.activations[outputLayerIndex] || [];
+
+      inputNodes.forEach(node => {
+        svg.select(`.node-${node.id}`).select('.node-feature-label')
+          .text(formatInputLabel(node, inputActivations[node.neuronIndex]));
+      });
+
+      outputNodes.forEach(node => {
+        svg.select(`.node-${node.id}`).select('.node-output-label')
+          .text(formatOutputLabel(node, outputActivations[node.neuronIndex], snap));
+      });
+    };
+
+    if (snapshot) {
+      updateNodeDescriptorText(snapshot);
+    }
+
     // Animation logic - TWO PHASE: Forward pass then Backward pass
     if (animate && epochSnapshots.length > 0 && !animationRef.current) {
       animationRef.current = true;
@@ -257,6 +351,9 @@ export function NetworkVisualizer({
         if (sampleIndex >= epochSnapshots.length) {
           // All samples processed - animation complete
           animationRef.current = false;
+          if (snapshot) {
+            updateNodeDescriptorText(snapshot);
+          }
           if (onAnimationComplete) {
             onAnimationComplete();
           }
@@ -264,6 +361,8 @@ export function NetworkVisualizer({
         }
 
         const currentSnapshot = epochSnapshots[sampleIndex];
+
+        updateNodeDescriptorText(currentSnapshot);
 
         // Group nodes by layer
         const layerGroups: NodeData[][] = [];

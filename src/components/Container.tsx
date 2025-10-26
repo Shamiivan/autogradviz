@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { TrainingManager } from "../micrograd/training";
 import type { TrainingSnapshot } from "../micrograd/types";
 import { NetworkVisualizer } from "./NetworkVizualiser";
+import { IRIS_CLASS_NAMES, IRIS_FEATURE_NAMES } from "../utils";
 
 function Container() {
   const [trainingManager, setTrainingManager] = useState<TrainingManager | null>(null);
@@ -100,6 +101,34 @@ function Container() {
     const epochSnapshots = getCurrentEpochSnapshots();
     return epochSnapshots.length > 0 ? epochSnapshots[epochSnapshots.length - 1] : undefined;
   };
+
+  const currentEpochSnapshots = getCurrentEpochSnapshots();
+  const currentSnapshot = getCurrentSnapshot();
+
+  const currentEpochAvgLoss = currentEpochSnapshots.length > 0
+    ? currentEpochSnapshots.reduce((sum, s) => sum + s.loss, 0) / currentEpochSnapshots.length
+    : 0;
+
+  const currentEpochAccuracy = currentEpochSnapshots.length > 0
+    ? (currentEpochSnapshots.filter(s => s.prediction === s.actualClass).length / currentEpochSnapshots.length) * 100
+    : 0;
+
+  const labeledInputs = currentSnapshot
+    ? (currentSnapshot.activations[0] || []).map((value, idx) => ({
+      label: IRIS_FEATURE_NAMES[idx] ?? `Feature ${idx + 1}`,
+      value
+    }))
+    : [];
+
+  const outputActivations = currentSnapshot
+    ? currentSnapshot.activations[currentSnapshot.activations.length - 1] || []
+    : [];
+
+  const labeledOutputs = outputActivations.map((value, idx) => ({
+    label: IRIS_CLASS_NAMES[idx] ?? `Class ${idx + 1}`,
+    value,
+    idx
+  }));
 
   if (isLoading) {
     return (
@@ -363,23 +392,118 @@ function Container() {
             </div>
           )}
 
-          {snapshots.length > 0 && getCurrentSnapshot() && (
-            <div style={{
-              marginTop: "20px",
-              padding: "16px",
-              background: "#ffffff",
-              borderRadius: "8px",
-              textAlign: "left",
-              fontSize: "14px",
-              color: "#374151"
-            }}>
-              <div style={{ fontWeight: "600", marginBottom: "8px" }}>
-                Epoch {currentEpoch + 1} Summary:
+          {snapshots.length > 0 && currentSnapshot && (
+            <>
+              <div style={{
+                marginTop: "20px",
+                padding: "16px",
+                background: "#ffffff",
+                borderRadius: "8px",
+                textAlign: "left",
+                fontSize: "14px",
+                color: "#374151"
+              }}>
+                <div style={{ fontWeight: "600", marginBottom: "8px" }}>
+                  Epoch {currentEpoch + 1} Summary:
+                </div>
+                <div>Training Samples: {currentEpochSnapshots.length}</div>
+                <div>Average Loss: {currentEpochAvgLoss.toFixed(4)}</div>
+                <div>Accuracy: {currentEpochAccuracy.toFixed(1)}%</div>
               </div>
-              <div>Training Samples: {getCurrentEpochSnapshots().length}</div>
-              <div>Average Loss: {(getCurrentEpochSnapshots().reduce((sum, s) => sum + s.loss, 0) / getCurrentEpochSnapshots().length).toFixed(4)}</div>
-              <div>Accuracy: {(getCurrentEpochSnapshots().filter(s => s.prediction === s.actualClass).length / getCurrentEpochSnapshots().length * 100).toFixed(1)}%</div>
-            </div>
+
+              <div style={{
+                marginTop: "16px",
+                padding: "16px",
+                background: "#ffffff",
+                borderRadius: "8px",
+                textAlign: "left",
+                fontSize: "14px",
+                color: "#374151",
+                display: "grid",
+                gap: "16px"
+              }}>
+                <div style={{ fontWeight: 600 }}>Current Sample Details</div>
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: "16px"
+                }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>
+                      Inputs
+                    </div>
+                    {IRIS_FEATURE_NAMES.map((feature, idx) => {
+                      const value = currentSnapshot.activations[0]?.[idx] ?? 0;
+                      return (
+                        <div
+                          key={feature}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            padding: "8px 12px",
+                            background: "#f9fafb",
+                            borderRadius: "6px",
+                            border: "1px solid #e5e7eb",
+                            fontSize: "13px"
+                          }}
+                        >
+                          <span>{feature}</span>
+                          <span style={{ fontVariantNumeric: "tabular-nums" }}>{value.toFixed(2)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>
+                      Output predictions
+                    </div>
+                    {IRIS_CLASS_NAMES.map((label, idx) => {
+                      const value = currentSnapshot.activations[currentSnapshot.activations.length - 1]?.[idx] ?? 0;
+                      const isPrediction = currentSnapshot.prediction === idx;
+                      const isTarget = currentSnapshot.actualClass === idx;
+                      const background = isPrediction && isTarget
+                        ? "#dcfce7"
+                        : isPrediction
+                          ? "#dbeafe"
+                          : isTarget
+                            ? "#fef9c3"
+                            : "#f9fafb";
+                      const border = isPrediction || isTarget ? "#94a3b8" : "#e5e7eb";
+
+                      return (
+                        <div
+                          key={label}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            padding: "8px 12px",
+                            background,
+                            borderRadius: "6px",
+                            border: `1px solid ${border}`,
+                            fontSize: "13px",
+                            fontWeight: isPrediction ? 600 : 500,
+                            color: "#111827",
+                            fontVariantNumeric: "tabular-nums"
+                          }}
+                        >
+                          <span>
+                            {label}
+                            {isTarget ? " (target)" : ""}
+                            {isPrediction && !isTarget ? " (prediction)" : ""}
+                            {isPrediction && isTarget ? " (correct)" : ""}
+                          </span>
+                          <span>{value.toFixed(2)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div style={{ fontSize: "13px", color: "#4b5563" }}>
+                  Predicted class: <strong>{IRIS_CLASS_NAMES[currentSnapshot.prediction] ?? "Unknown"}</strong> • Actual class: <strong>{IRIS_CLASS_NAMES[currentSnapshot.actualClass] ?? currentSnapshot.sample.label}</strong>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}
