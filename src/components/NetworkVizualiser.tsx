@@ -2,12 +2,17 @@ import { useEffect, useRef } from 'react';
 import * as d3 from 'd3';
 import { MLP } from '../micrograd/nn';
 import { Value } from '../micrograd/engine';
+import type { TrainingSnapshot } from '../micrograd/types';
 
 interface NetworkVisualizerProps {
   mlp: MLP;
   inputs: Value[];
+  snapshot?: TrainingSnapshot; // Optional snapshot for activation visualization
   width?: number;
   height?: number;
+  animate?: boolean; // Trigger animation
+  onAnimationComplete?: () => void; // Callback when animation finishes
+  epochSnapshots?: TrainingSnapshot[]; // All snapshots for the current epoch
 }
 
 interface NodeData {
@@ -15,6 +20,9 @@ interface NodeData {
   x: number;
   y: number;
   type: 'input' | 'hidden' | 'output';
+  activation?: number; // Activation value for coloring
+  layerIndex: number;
+  neuronIndex: number;
 }
 
 interface EdgeData {
@@ -26,10 +34,21 @@ interface EdgeData {
 export function NetworkVisualizer({
   mlp,
   inputs,
+  snapshot,
   width = 900,
   height = 500,
+  animate = false,
+  onAnimationComplete,
+  epochSnapshots = [],
 }: NetworkVisualizerProps) {
   const svgRef = useRef<SVGSVGElement>(null);
+  const animationRef = useRef<boolean>(false);
+
+  // Activation threshold - nodes only fill if activation > 0.3
+  const ACTIVATION_THRESHOLD = 0.3;
+
+  // Gradient threshold - show gradient color if > 0.01
+  const GRADIENT_THRESHOLD = 0.01;
 
   useEffect(() => {
     if (!svgRef.current) return;
@@ -46,14 +65,53 @@ export function NetworkVisualizer({
       .domain([0, numLayers - 1])
       .range([80, width - 80]);
 
+    // Create enhanced color scale with more dramatic differences
+    // FOR FORWARD PASS (ACTIVATION)
+    const activationColorScale = (activation: number) => {
+      if (activation < ACTIVATION_THRESHOLD) return 'white';
+      if (activation < 0.5) return '#ef4444'; // red
+      if (activation < 0.7) return '#eab308'; // yellow
+      return '#10b981'; // green
+    };
+
+    const borderColorScale = (activation: number) => {
+      if (activation < ACTIVATION_THRESHOLD) return '#9ca3af'; // gray
+      if (activation < 0.5) return '#991b1b'; // dark red
+      if (activation < 0.7) return '#a16207'; // dark yellow
+      return '#047857'; // dark green
+    };
+
+    // FOR BACKWARD PASS (GRADIENTS) - Purple to Pink to White
+    const gradientColorScale = (gradient: number) => {
+      if (gradient < GRADIENT_THRESHOLD) return 'white';
+      if (gradient < 0.5) return '#f9a8d4'; // light pink
+      if (gradient < 1.0) return '#ec4899'; // hot pink
+      return '#9333ea'; // deep purple
+    };
+
+    const gradientBorderScale = (gradient: number) => {
+      if (gradient < GRADIENT_THRESHOLD) return '#9ca3af';
+      if (gradient < 0.5) return '#be185d'; // dark pink
+      if (gradient < 1.0) return '#be185d'; // dark pink
+      return '#6b21a8'; // dark purple
+    };
+
+    // Input layer
     for (let i = 0; i < inputs.length; i++) {
       const layerSize = inputs.length;
       const y = height / 2 + (i - (layerSize - 1) / 2) * 60;
+
+      // Get activation from snapshot if available
+      const activation = snapshot ? snapshot.activations[0][i] : undefined;
+
       nodes.push({
         id: `in-${i}`,
         x: layerX(0),
         y,
-        type: 'input'
+        type: 'input',
+        activation,
+        layerIndex: 0,
+        neuronIndex: i
       });
     }
 
@@ -69,11 +127,17 @@ export function NetworkVisualizer({
         const y = height / 2 + (neuronIdx - (layerSize - 1) / 2) * 60;
         const nodeId = `L${layerNum}-${neuronIdx}`;
 
+        // Get activation from snapshot if available
+        const activation = snapshot ? snapshot.activations[layerNum][neuronIdx] : undefined;
+
         const targetNode: NodeData = {
           id: nodeId,
           x: layerX(layerNum),
           y,
-          type: isOutput ? 'output' : 'hidden'
+          type: isOutput ? 'output' : 'hidden',
+          activation,
+          layerIndex: layerNum,
+          neuronIndex: neuronIdx
         };
 
         currentNodes.push(targetNode);
@@ -94,9 +158,10 @@ export function NetworkVisualizer({
 
     // Calculate weight scale
     const maxWeight = Math.max(...edges.map(e => Math.abs(e.weight)));
-    const widthScale = d3.scaleLinear()
-      .domain([0, maxWeight])
-      .range([0.5, 4]);
+    const widthScale = d3.scalePow()
+      .exponent(1.5)
+      .domain([0, maxWeight || 1])
+      .range([0.3, 6]);
 
     // Draw edges
     svg.append('g')
@@ -111,28 +176,303 @@ export function NetworkVisualizer({
       .attr('stroke', d => d.weight >= 0 ? '#3b82f6' : '#ef4444')
       .attr('stroke-width', d => widthScale(Math.abs(d.weight)))
       .attr('opacity', 0.6)
-      .attr('stroke-linecap', 'round');
+      .attr('stroke-linecap', 'round')
+      .attr('class', (d) => `edge-${d.source.id}-${d.target.id}`);
 
-    // Draw nodes
+    // Node colors (used when no activation data available)
     const nodeColors = {
       input: '#10b981',
       hidden: '#6366f1',
       output: '#f59e0b'
     };
 
-    svg.append('g')
-      .selectAll('circle')
+    // Draw nodes
+    const nodeGroup = svg.append('g')
+      .selectAll('g')
       .data(nodes)
       .enter()
+      .append('g')
+      .attr('class', d => `node-${d.id}`);
+
+    // Add circles
+    nodeGroup
       .append('circle')
       .attr('cx', d => d.x)
       .attr('cy', d => d.y)
       .attr('r', 18)
-      .attr('fill', 'white')
-      .attr('stroke', d => nodeColors[d.type])
-      .attr('stroke-width', 2.5);
+      .attr('fill', d => {
+        // Start with white/empty if animating
+        if (animate && !animationRef.current) {
+          return 'white';
+        }
+        // Use threshold-based coloring
+        if (d.activation !== undefined) {
+          return activationColorScale(d.activation);
+        }
+        return 'white';
+      })
+      .attr('stroke', d => {
+        // Use border colors based on activation
+        if (d.activation !== undefined) {
+          return borderColorScale(d.activation);
+        }
+        return nodeColors[d.type];
+      })
+      .attr('stroke-width', 2.5)
+      .attr('class', 'node-circle');
 
-  }, [mlp, inputs, width, height]);
+    // Add tooltips
+    nodeGroup
+      .append('title')
+      .text(d => {
+        const layerName = d.type === 'input' ? 'Input' :
+          d.type === 'output' ? 'Output' :
+            'Hidden';
+        const activation = d.activation !== undefined ?
+          `\nActivation: ${d.activation.toFixed(4)}` : '';
+        return `${layerName} Layer ${d.layerIndex}\nNeuron ${d.neuronIndex}${activation}`;
+      });
+
+    // Add text labels showing activation values (small, centered on node)
+    nodeGroup
+      .append('text')
+      .attr('x', d => d.x)
+      .attr('y', d => d.y)
+      .attr('text-anchor', 'middle')
+      .attr('dominant-baseline', 'middle')
+      .attr('font-size', '9px')
+      .attr('font-weight', 'bold')
+      .attr('fill', '#1f2937')
+      .attr('pointer-events', 'none')
+      .attr('class', 'node-label')
+      .text(d => d.activation !== undefined ? d.activation.toFixed(2) : '')
+      .style('opacity', 0);
+
+    // Animation logic - TWO PHASE: Forward pass then Backward pass
+    if (animate && epochSnapshots.length > 0 && !animationRef.current) {
+      animationRef.current = true;
+
+      // Animate each sample in the epoch
+      const animateSample = (sampleIndex: number) => {
+        if (sampleIndex >= epochSnapshots.length) {
+          // All samples processed - animation complete
+          animationRef.current = false;
+          if (onAnimationComplete) {
+            onAnimationComplete();
+          }
+          return;
+        }
+
+        const currentSnapshot = epochSnapshots[sampleIndex];
+
+        // Group nodes by layer
+        const layerGroups: NodeData[][] = [];
+        for (let i = 0; i < numLayers; i++) {
+          layerGroups.push(nodes.filter(n => n.layerIndex === i));
+        }
+
+        // PHASE 1: FORWARD PASS (Input → Output)
+        const animateForwardLayer = (layerIndex: number, delay: number) => {
+          if (layerIndex >= numLayers) {
+            // Forward pass complete - start backward pass
+            setTimeout(() => {
+              animateBackwardLayer(numLayers - 1, 0);
+            }, 500); // Brief pause before backward
+            return;
+          }
+
+          const layerNodes = layerGroups[layerIndex];
+
+          // Animate edges feeding into this layer
+          if (layerIndex > 0) {
+            const incomingEdges = edges.filter(e => e.target.layerIndex === layerIndex);
+
+            incomingEdges.forEach(edge => {
+              svg.select(`.edge-${edge.source.id}-${edge.target.id}`)
+                .transition()
+                .duration(150)
+                .delay(delay)
+                .attr('opacity', 0.9)
+                .transition()
+                .duration(150)
+                .attr('opacity', 0.6);
+            });
+          }
+
+          // Animate nodes - GROW effect for high activation
+          layerNodes.forEach((node) => {
+            const nodeCircle = svg.select(`.node-${node.id}`).select('.node-circle');
+            const nodeLabel = svg.select(`.node-${node.id}`).select('.node-label');
+
+            const activation = currentSnapshot.activations[layerIndex][node.neuronIndex];
+            const fillColor = activationColorScale(activation);
+            const strokeColor = borderColorScale(activation);
+
+            // Scale based on activation - DRAMATIC size difference
+            const scale = activation >= ACTIVATION_THRESHOLD ? 1 + (activation * 0.4) : 1.0;
+
+            nodeCircle
+              .transition()
+              .duration(200)
+              .delay(delay + 100)
+              .attr('fill', fillColor)
+              .attr('stroke', strokeColor)
+              .attr('r', 18 * scale); // GROW for high activation
+
+            // Show activation value
+            nodeLabel
+              .text(activation.toFixed(2))
+              .transition()
+              .duration(200)
+              .delay(delay + 100)
+              .style('opacity', 1);
+          });
+
+          setTimeout(() => {
+            animateForwardLayer(layerIndex + 1, 0);
+          }, delay + 300);
+        };
+
+        // PHASE 2: BACKWARD PASS (Output → Input) - REVERSE ORDER
+        const animateBackwardLayer = (layerIndex: number, delay: number) => {
+          if (layerIndex < 0) {
+            // Backward pass complete - start weight update phase
+            setTimeout(() => {
+              animateWeightUpdates();
+            }, 300);
+            return;
+          }
+
+          const layerNodes = layerGroups[layerIndex];
+
+          // Animate edges in REVERSE - orange color for gradients
+          if (layerIndex < numLayers - 1) {
+            const outgoingEdges = edges.filter(e => e.source.layerIndex === layerIndex);
+
+            outgoingEdges.forEach(edge => {
+              svg.select(`.edge-${edge.source.id}-${edge.target.id}`)
+                .transition()
+                .duration(150)
+                .delay(delay)
+                .attr('stroke', '#f97316') // Orange for backward pass
+                .attr('opacity', 0.9)
+                .transition()
+                .duration(150)
+                .attr('stroke', () => edge.weight >= 0 ? '#3b82f6' : '#ef4444')
+                .attr('opacity', 0.6);
+            });
+          }
+
+          // Animate gradient visualization - SHRINK effect for high gradient
+          layerNodes.forEach((node) => {
+            const nodeCircle = svg.select(`.node-${node.id}`).select('.node-circle');
+            const nodeLabel = svg.select(`.node-${node.id}`).select('.node-label');
+
+            // Get gradient from snapshot (skip input layer as it has no gradients)
+            const gradient = layerIndex > 0 ?
+              (currentSnapshot.gradients[layerIndex - 1]?.[node.neuronIndex] || 0) : 0;
+
+            const gradFillColor = gradientColorScale(gradient);
+            const gradStrokeColor = gradientBorderScale(gradient);
+
+            // SHRINK for high gradient - opposite of forward pass
+            const scale = gradient >= GRADIENT_THRESHOLD ? 1 - (Math.min(gradient, 1.0) * 0.3) : 1.0;
+
+            nodeCircle
+              .transition()
+              .duration(200)
+              .delay(delay + 100)
+              .attr('fill', gradFillColor)
+              .attr('stroke', gradStrokeColor)
+              .attr('r', 18 * scale); // SHRINK for high gradient
+
+            // Show gradient value
+            if (gradient >= GRADIENT_THRESHOLD) {
+              nodeLabel
+                .text(gradient.toFixed(3))
+                .attr('fill', '#6b21a8') // Purple text for gradients
+                .transition()
+                .duration(200)
+                .delay(delay + 100)
+                .style('opacity', 1);
+            }
+          });
+
+          setTimeout(() => {
+            animateBackwardLayer(layerIndex - 1, 0);
+          }, delay + 300);
+        };
+
+        // PHASE 3: WEIGHT UPDATE - Show edges changing thickness
+        const animateWeightUpdates = () => {
+          // Get all edges and their weight deltas
+          edges.forEach((edge) => {
+            // Find weight delta from snapshot
+            const targetLayer = edge.target.layerIndex;
+
+            // Weight delta is stored in target layer
+            const delta = currentSnapshot.weightDeltas[targetLayer - 1]?.[edge.target.neuronIndex]?.[edge.source.neuronIndex] || 0;
+
+            const absDelta = Math.abs(delta);
+
+            // Calculate new weight (approximate)
+            const newWeight = edge.weight - delta; // negative because we subtracted the delta
+            const newThickness = widthScale(Math.abs(newWeight));
+
+            // Flash color based on delta direction
+            const flashColor = delta > 0 ? '#10b981' : '#ef4444'; // Green for increase, red for decrease
+
+            if (absDelta > 0.001) { // Only animate significant changes
+              svg.select(`.edge-${edge.source.id}-${edge.target.id}`)
+                // Flash the color
+                .transition()
+                .duration(200)
+                .attr('stroke', flashColor)
+                .attr('opacity', 0.9)
+                // Morph thickness
+                .transition()
+                .duration(400)
+                .attr('stroke-width', newThickness)
+                .attr('stroke', () => newWeight >= 0 ? '#3b82f6' : '#ef4444')
+                .attr('opacity', 0.7)
+                // Reset opacity
+                .transition()
+                .duration(200)
+                .attr('opacity', 0.6);
+            }
+          });
+
+          // After weight updates, reset nodes and move to next sample
+          setTimeout(() => {
+            nodes.forEach(node => {
+              svg.select(`.node-${node.id}`).select('.node-circle')
+                .transition()
+                .duration(150)
+                .attr('fill', 'white')
+                .attr('stroke', '#9ca3af')
+                .attr('r', 18); // Reset size
+
+              svg.select(`.node-${node.id}`).select('.node-label')
+                .transition()
+                .duration(150)
+                .style('opacity', 0);
+            });
+
+            setTimeout(() => {
+              animateSample(sampleIndex + 1);
+            }, 200);
+          }, 800); // Wait for weight animations to complete
+        };
+
+        // Start with forward pass
+        animateForwardLayer(0, 0);
+      };
+
+      // Start with first sample
+      animateSample(0);
+    }
+
+  }, [mlp, inputs, snapshot, width, height, animate, onAnimationComplete, epochSnapshots]);
 
   return (
     <svg

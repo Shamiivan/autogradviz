@@ -51,9 +51,8 @@ export class TrainingManager {
     for (let i = 0; i < this.trainData.length; i++) {
       const sample = this.trainData[i];
 
-      // Capture snapshot before training step
+      // Capture snapshot before training step (forward pass)
       const snapshot = this.captureSnapshot(epoch, i, sample);
-      this.snapshots.push(snapshot);
 
       epochLoss += snapshot.loss;
       this.currentStep++;
@@ -75,10 +74,32 @@ export class TrainingManager {
       // Backward pass
       loss.backward();
 
+      // NOW capture gradients after backward pass
+      this.captureGradients(snapshot);
+
+      // Capture weights BEFORE update
+      const oldWeights: number[][][] = this.mlp.layers.map(layer =>
+        layer.neurons.map(neuron => neuron.w.map(w => w.data))
+      );
+
       // Update weights
       for (const param of this.mlp.parameters()) {
         param.data -= this.config.learningRate * param.grad;
       }
+
+      // Capture weight deltas AFTER update
+      this.mlp.layers.forEach((layer, layerIdx) => {
+        layer.neurons.forEach((neuron, neuronIdx) => {
+          neuron.w.forEach((weight, weightIdx) => {
+            const oldWeight = oldWeights[layerIdx][neuronIdx][weightIdx];
+            const delta = weight.data - oldWeight;
+            snapshot.weightDeltas[layerIdx][neuronIdx][weightIdx] = delta;
+          });
+        });
+      });
+
+      // Add snapshot AFTER we have gradients and weight deltas
+      this.snapshots.push(snapshot);
     }
 
     const avgLoss = epochLoss / this.trainData.length;
@@ -124,7 +145,7 @@ export class TrainingManager {
     // Get actual class
     const actualClass = sample.outputs.findIndex(o => o.data === 1);
 
-    // Gradients (will be computed after backward pass - for now empty)
+    // Placeholder gradients - will be filled after backward pass
     const gradients: number[][] = this.mlp.layers.map(layer =>
       layer.neurons.map(() => 0)
     );
@@ -146,6 +167,19 @@ export class TrainingManager {
       prediction: predictedClass,
       actualClass
     };
+  }
+
+  /**
+   * Capture gradients after backward pass
+   */
+  private captureGradients(snapshot: TrainingSnapshot): void {
+    // Capture gradients from each layer's neurons
+    this.mlp.layers.forEach((layer, layerIdx) => {
+      layer.neurons.forEach((neuron, neuronIdx) => {
+        // Use the bias gradient as representative of neuron's gradient magnitude
+        snapshot.gradients[layerIdx][neuronIdx] = Math.abs(neuron.b.grad);
+      });
+    });
   }
 
   /**
