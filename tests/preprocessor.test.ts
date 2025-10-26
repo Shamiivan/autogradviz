@@ -131,8 +131,8 @@ describe('Iris Data Preprocessing', () => {
     it('should not have overlapping samples', () => {
       const { train, test } = splitTrainTest(data);
 
-      const trainLabels = train.map(s => s.label);
-      const testLabels = test.map(s => s.label);
+      // const trainLabels = train.map(s => s.label);
+      // const testLabels = test.map(s => s.label);
 
       // This is a simple check - in reality we'd check actual object references
       expect(train.length + test.length).toBe(data.length);

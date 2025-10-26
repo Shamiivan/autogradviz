@@ -1,45 +1,84 @@
-
-import React from "react";
-import { MLP } from "../micrograd/nn";
-import { Value } from "../micrograd/engine";
+import { useState, useEffect } from "react";
+import { TrainingManager } from "../micrograd/training";
+import type { TrainingSnapshot } from "../micrograd/types";
 import { NetworkVisualizer } from "./NetworkVizualiser";
-import "../App.css";
 
 function Container() {
-  // Create MLP once and train it
-  const mlp = React.useMemo(() => {
-    const network = new MLP(2, [6, 6, 1]);
+  const [trainingManager, setTrainingManager] = useState<TrainingManager | null>(null);
+  const [snapshots, setSnapshots] = useState<TrainingSnapshot[]>([]);
+  const [isTraining, setIsTraining] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-    const trainingData = [
-      { x: [new Value(0), new Value(0)], y: new Value(0) },
-      { x: [new Value(0), new Value(1)], y: new Value(1) },
-      { x: [new Value(1), new Value(0)], y: new Value(1) },
-      { x: [new Value(1), new Value(1)], y: new Value(0) },
-    ];
+  // Initialize training manager and load data
+  useEffect(() => {
+    const initTraining = async () => {
+      console.log("🎬 Initializing training system...");
 
-    // Quick training for interesting weights
-    for (let i = 0; i < 5; i++) {
-      for (const { x, y } of trainingData) {
-        network.zeroGrad();
-        const pred = network.forward(x);
-        const predValue = Array.isArray(pred) ? pred[0] : pred;
+      // Create training manager with config
+      const manager = new TrainingManager({
+        epochs: 5,
+        learningRate: 0.1,
+        trainTestSplit: 0.8
+      });
 
-        // Compute loss (MSE) and backward
-        predValue.data -= y.data;
+      // Load Iris data
+      await manager.loadData();
 
-        for (const p of network.parameters()) {
-          p.data -= 0.01 * p.grad;
-        }
-      }
-    }
+      setTrainingManager(manager);
+      setIsLoading(false);
 
-    return network;
+      console.log("✅ System ready! Click 'Start Training' to begin.");
+    };
+
+    initTraining();
   }, []);
 
-  const inputs = React.useMemo(() => [
-    new Value(0.5),
-    new Value(-0.3)
-  ], []);
+  // Start training
+  const handleStartTraining = async () => {
+    if (!trainingManager || isTraining) return;
+
+    setIsTraining(true);
+    console.log("\n" + "=".repeat(50));
+
+    // Train the network
+    await trainingManager.train();
+
+    // Get all snapshots
+    const allSnapshots = trainingManager.getSnapshots();
+    setSnapshots(allSnapshots);
+
+    console.log("=".repeat(50) + "\n");
+
+    // Log summary
+    console.log("📈 Training Summary:");
+    console.log(`   Total steps: ${allSnapshots.length}`);
+    console.log(`   Initial loss: ${allSnapshots[0]?.loss.toFixed(4)}`);
+    console.log(`   Final loss: ${allSnapshots[allSnapshots.length - 1]?.loss.toFixed(4)}`);
+
+    // Log first few snapshots as examples
+    console.log("\n📸 Sample Snapshots:");
+    allSnapshots.slice(0, 3).forEach(snap => {
+      console.log(`   Step ${snap.step}: Loss=${snap.loss.toFixed(4)}, ` +
+        `Pred=${snap.prediction}, Actual=${snap.actualClass}, ` +
+        `Label=${snap.sample.label}`);
+    });
+
+    setIsTraining(false);
+  };
+
+  if (isLoading) {
+    return (
+      <div style={{
+        padding: "40px",
+        maxWidth: "1200px",
+        margin: "0 auto",
+        fontFamily: "system-ui, -apple-system, sans-serif"
+      }}>
+        <h1>Loading Iris Dataset...</h1>
+        <p>Check the console for logs 🔍</p>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -54,39 +93,86 @@ function Container() {
         marginBottom: "8px",
         color: "#111827"
       }}>
-        Neural Network Architecture
+        Neural Network Training Visualizer
       </h1>
       <p style={{
         fontSize: "16px",
         color: "#6b7280",
         marginBottom: "32px"
       }}>
-        2 inputs → 6 → 6 → 1 output
+        Training on Iris Dataset: 4 inputs → 8 → 8 → 3 outputs
       </p>
 
-      <NetworkVisualizer
-        mlp={mlp}
-        inputs={inputs}
-        width={900}
-        height={500}
-      />
-
+      {/* Controls */}
       <div style={{
-        marginTop: "24px",
-        padding: "20px",
-        background: "#f9fafb",
-        borderRadius: "8px",
-        fontSize: "14px"
+        marginBottom: "32px",
+        display: "flex",
+        gap: "16px",
+        alignItems: "center"
       }}>
-        <div style={{ fontWeight: "600", marginBottom: "8px" }}>Legend:</div>
-        <div style={{ display: "flex", gap: "20px", flexWrap: "wrap" }}>
-          <div><span style={{ color: "#10b981" }}>●</span> Input nodes</div>
-          <div><span style={{ color: "#6366f1" }}>●</span> Hidden nodes</div>
-          <div><span style={{ color: "#f59e0b" }}>●</span> Output nodes</div>
-          <div><span style={{ color: "#3b82f6" }}>━</span> Positive weights</div>
-          <div><span style={{ color: "#ef4444" }}>━</span> Red edges = Negative weights</div>
-          <div>Thickness = weight magnitude</div>
+        <button
+          onClick={handleStartTraining}
+          disabled={isTraining}
+          style={{
+            padding: "12px 24px",
+            fontSize: "16px",
+            fontWeight: "600",
+            color: "white",
+            background: isTraining ? "#9ca3af" : "#3b82f6",
+            border: "none",
+            borderRadius: "8px",
+            cursor: isTraining ? "not-allowed" : "pointer",
+            transition: "background 0.2s"
+          }}
+        >
+          {isTraining ? "Training..." : "Start Training"}
+        </button>
+
+        {snapshots.length > 0 && (
+          <div style={{
+            fontSize: "14px",
+            color: "#6b7280"
+          }}>
+            ✅ Captured {snapshots.length} snapshots
+          </div>
+        )}
+      </div>
+
+      {/* Visualization Placeholder */}
+      {trainingManager && (
+        <div style={{
+          border: "2px dashed #e5e7eb",
+          borderRadius: "8px",
+          padding: "40px",
+          textAlign: "center",
+          background: "#f9fafb"
+        }}>
+          <NetworkVisualizer
+            mlp={trainingManager.getNetwork()}
+            inputs={trainingManager.getTrainData()[0]?.inputs || []}
+            width={900}
+            height={500}
+          />
         </div>
+      )}
+
+      {/* Instructions */}
+      <div style={{
+        marginTop: "32px",
+        padding: "20px",
+        background: "#eff6ff",
+        borderRadius: "8px",
+        border: "1px solid #bfdbfe"
+      }}>
+        <div style={{ fontWeight: "600", marginBottom: "8px", color: "#1e40af" }}>
+          📋 Instructions:
+        </div>
+        <ol style={{ margin: 0, paddingLeft: "20px", color: "#1e40af" }}>
+          <li>Open your browser's Developer Console (F12)</li>
+          <li>Click "Start Training" to begin</li>
+          <li>Watch the console for detailed training logs</li>
+          <li>Next increment will add visualization animation! 🎨</li>
+        </ol>
       </div>
     </div>
   );
