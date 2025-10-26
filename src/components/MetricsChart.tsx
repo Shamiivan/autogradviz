@@ -1,13 +1,14 @@
 import type { FC } from "react";
 
-export interface EpochMetric {
-  epoch: number;
+export interface MetricsPoint {
+  id: number;
   avgLoss: number;
   accuracy: number; // expressed as 0-1
+  label?: string;
 }
 
 interface MetricsChartProps {
-  metrics: EpochMetric[];
+  metrics: MetricsPoint[];
   width?: number;
   height?: number;
 }
@@ -57,7 +58,7 @@ export const MetricsChart: FC<MetricsChartProps> = ({
       width={width}
       height={height}
       role="img"
-      aria-label="Loss and accuracy over epochs"
+      aria-label="Loss and accuracy over training passes"
       style={{ width: "100%", height: "auto" }}
     >
       {/* Background */}
@@ -123,7 +124,7 @@ export const MetricsChart: FC<MetricsChartProps> = ({
       {/* Loss points */}
       {metrics.map((metric, index) => (
         <circle
-          key={`loss-point-${metric.epoch}`}
+          key={`loss-point-${metric.id ?? index}`}
           cx={xForIndex(index)}
           cy={yForLoss(metric.avgLoss)}
           r={5}
@@ -136,7 +137,7 @@ export const MetricsChart: FC<MetricsChartProps> = ({
       {/* Accuracy points */}
       {metrics.map((metric, index) => (
         <circle
-          key={`accuracy-point-${metric.epoch}`}
+          key={`accuracy-point-${metric.id ?? index}`}
           cx={xForIndex(index)}
           cy={yForAccuracy(clamp(metric.accuracy, 0, 1))}
           r={5}
@@ -146,17 +147,17 @@ export const MetricsChart: FC<MetricsChartProps> = ({
         />
       ))}
 
-      {/* Epoch labels */}
+      {/* Pass labels */}
       {metrics.map((metric, index) => (
         <text
-          key={`epoch-label-${metric.epoch}`}
+          key={`pass-label-${metric.id ?? index}`}
           x={xForIndex(index)}
           y={baselineY + 20}
           textAnchor="middle"
           fontSize={12}
           fill="#4b5563"
         >
-          {metric.epoch + 1}
+          {metric.label ?? index + 1}
         </text>
       ))}
 

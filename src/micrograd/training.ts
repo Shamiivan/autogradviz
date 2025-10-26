@@ -16,6 +16,10 @@ export class TrainingManager {
   private snapshots: TrainingSnapshot[] = [];
   private currentStep = 0;
   private snapshotListeners: Array<(snapshot: TrainingSnapshot) => void> = [];
+  private paused = false;
+  private resumePromise: Promise<void> | null = null;
+  private resumeResolver: (() => void) | null = null;
+  private stopRequested = false;
 
   constructor(config: TrainingConfig) {
     this.config = { ...config };
@@ -52,6 +56,9 @@ export class TrainingManager {
     let epochLoss = 0;
 
     for (let i = 0; i < this.trainData.length; i++) {
+      if (this.stopRequested) {
+        break;
+      }
       const sample = this.trainData[i];
 
       // Capture snapshot before training step (forward pass)
@@ -105,6 +112,10 @@ export class TrainingManager {
       this.snapshots.push(snapshot);
       this.emitSnapshot(snapshot);
       await this.yieldForVisualization();
+
+      if (this.stopRequested) {
+        break;
+      }
     }
 
     const avgLoss = epochLoss / this.trainData.length;
@@ -194,8 +205,14 @@ export class TrainingManager {
     console.log("\n🚀 Starting training...");
     console.log(`   Config: ${this.config.epochs} epochs, lr=${this.config.learningRate}`);
 
+    this.stopRequested = false;
+
     for (let epoch = 0; epoch < this.config.epochs; epoch++) {
       await this.trainEpoch(epoch);
+      if (this.stopRequested) {
+        console.log("⏹️  Training stopped by user request.");
+        break;
+      }
     }
 
     console.log("\n✅ Training complete!");
@@ -253,6 +270,43 @@ export class TrainingManager {
   clearSnapshots(): void {
     this.snapshots = [];
     this.currentStep = 0;
+    this.paused = false;
+    this.resolvePause();
+    this.stopRequested = false;
+  }
+
+  /**
+   * Pause training after the current step completes
+   */
+  pause(): void {
+    if (this.paused) return;
+    this.paused = true;
+  }
+
+  /**
+   * Resume training if paused
+   */
+  resume(): void {
+    if (!this.paused) return;
+    this.paused = false;
+    this.resolvePause();
+  }
+
+  /**
+   * Stop training entirely
+   */
+  stop(): void {
+    if (this.stopRequested) return;
+    this.stopRequested = true;
+    this.paused = false;
+    this.resolvePause();
+  }
+
+  /**
+   * Whether training is currently paused
+   */
+  isPaused(): boolean {
+    return this.paused;
   }
 
   private emitSnapshot(snapshot: TrainingSnapshot): void {
@@ -262,10 +316,36 @@ export class TrainingManager {
   }
 
   private async yieldForVisualization(): Promise<void> {
-    if (this.snapshotListeners.length === 0) {
+    const delay = Math.max(0, this.stepDelayMs);
+    if (delay > 0) {
+      await new Promise<void>(resolve => setTimeout(resolve, delay));
+    }
+
+    if (this.stopRequested) {
       return;
     }
-    const delay = Math.max(0, this.stepDelayMs);
-    await new Promise<void>(resolve => setTimeout(resolve, delay));
+
+    if (!this.paused) {
+      return;
+    }
+
+    if (!this.resumePromise) {
+      this.resumePromise = new Promise<void>(resolve => {
+        this.resumeResolver = resolve;
+      });
+    }
+
+    await this.resumePromise;
+  }
+
+  private resolvePause(): void {
+    if (this.resumeResolver) {
+      const resolver = this.resumeResolver;
+      this.resumeResolver = null;
+      this.resumePromise = null;
+      resolver();
+    } else {
+      this.resumePromise = null;
+    }
   }
 }

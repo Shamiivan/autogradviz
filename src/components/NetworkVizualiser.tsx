@@ -47,7 +47,7 @@ export function NetworkVisualizer({
   const animationRef = useRef<boolean>(false);
 
   // Activation threshold - nodes only fill if activation > 0.3
-  const ACTIVATION_THRESHOLD = 0.3;
+  const ACTIVATION_THRESHOLD = 0.5;
 
   // Gradient threshold - show gradient color if > 0.01
   const GRADIENT_THRESHOLD = 0.01;

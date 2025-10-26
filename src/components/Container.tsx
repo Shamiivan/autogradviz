@@ -3,7 +3,7 @@ import { TrainingManager } from "../micrograd/training";
 import type { TrainingSnapshot } from "../micrograd/types";
 import { NetworkVisualizer } from "./NetworkVizualiser";
 import { IRIS_CLASS_NAMES, IRIS_FEATURE_NAMES } from "../utils";
-import { MetricsChart, type EpochMetric } from "./MetricsChart";
+import { MetricsChart, type MetricsPoint } from "./MetricsChart";
 
 function Container() {
   const [trainingManager, setTrainingManager] = useState<TrainingManager | null>(null);
@@ -14,6 +14,19 @@ function Container() {
   const [isAnimating, setIsAnimating] = useState(false);
   const [animationTrigger, setAnimationTrigger] = useState(0);
   const [maxEpochs, setMaxEpochs] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(
+    typeof window !== "undefined" ? window.innerWidth : 1024
+  );
+  const isMobile = viewportWidth < 768;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = () => setViewportWidth(window.innerWidth);
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // Initialize training manager and load data
   useEffect(() => {
@@ -24,7 +37,8 @@ function Container() {
       const manager = new TrainingManager({
         epochs: 10,
         learningRate: 0.1,
-        trainTestSplit: 0.8
+        trainTestSplit: 0.8,
+        stepDelayMs: 120
       });
 
       // Load Iris data
@@ -46,10 +60,12 @@ function Container() {
 
     setSnapshots([]);
     setCurrentEpoch(0);
+    setIsPaused(false);
     trainingManager.clearSnapshots();
 
     const unsubscribe = trainingManager.onSnapshot(snapshot => {
       setSnapshots(prev => [...prev, snapshot]);
+      setCurrentEpoch(snapshot.epoch);
     });
 
     setIsTraining(true);
@@ -71,12 +87,31 @@ function Container() {
     } finally {
       unsubscribe();
       setIsTraining(false);
+      setIsPaused(false);
     }
+  };
+
+  const handlePauseTraining = () => {
+    if (!trainingManager || !isTraining || isPaused) return;
+    trainingManager.pause();
+    setIsPaused(true);
+  };
+
+  const handleResumeTraining = () => {
+    if (!trainingManager || !isTraining || !isPaused) return;
+    trainingManager.resume();
+    setIsPaused(false);
   };
 
   // Play animation for current epoch
   const handlePlayAnimation = () => {
     if (snapshots.length === 0 || isAnimating) return;
+
+    if (trainingManager && isTraining) {
+      trainingManager.stop();
+      setIsPaused(false);
+    }
+
     setIsAnimating(true);
     setAnimationTrigger(prev => prev + 1);
   };
@@ -139,37 +174,39 @@ function Container() {
     idx
   }));
 
-  const epochMetrics = useMemo<EpochMetric[]>(() => {
+  const passMetrics = useMemo<MetricsPoint[]>(() => {
     if (snapshots.length === 0) {
       return [];
     }
 
-    const aggregates = new Map<number, { lossSum: number; correct: number; count: number }>();
+    let cumulativeLoss = 0;
+    let cumulativeCorrect = 0;
 
-    snapshots.forEach(snapshot => {
-      const entry = aggregates.get(snapshot.epoch) ?? { lossSum: 0, correct: 0, count: 0 };
-      entry.lossSum += snapshot.loss;
-      entry.count += 1;
+    return snapshots.map((snapshot, index) => {
+      cumulativeLoss += snapshot.loss;
       if (snapshot.prediction === snapshot.actualClass) {
-        entry.correct += 1;
+        cumulativeCorrect += 1;
       }
-      aggregates.set(snapshot.epoch, entry);
+      const passes = index + 1;
+      return {
+        id: snapshot.step,
+        avgLoss: cumulativeLoss / passes,
+        accuracy: cumulativeCorrect / passes,
+        label: passes.toString()
+      };
     });
-
-    return Array.from(aggregates.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([epoch, { lossSum, count, correct }]) => ({
-        epoch,
-        avgLoss: count > 0 ? lossSum / count : 0,
-        accuracy: count > 0 ? correct / count : 0
-      }));
   }, [snapshots]);
+
+  const vizWidth = Math.max((isMobile ? viewportWidth - 32 : 900), 320);
+  const vizHeight = isMobile ? 420 : 500;
+  const metricsWidth = Math.max((isMobile ? viewportWidth - 32 : 860), 320);
+  const metricsHeight = isMobile ? 220 : 260;
 
   if (isLoading) {
     return (
       <div style={{
-        padding: "40px",
-        maxWidth: "1200px",
+        padding: isMobile ? "24px" : "40px",
+        maxWidth: isMobile ? "100%" : "1200px",
         margin: "0 auto",
         fontFamily: "system-ui, -apple-system, sans-serif"
       }}>
@@ -181,34 +218,36 @@ function Container() {
 
   return (
     <div style={{
-      padding: "40px",
-      maxWidth: "1200px",
+      padding: isMobile ? "24px" : "40px",
+      maxWidth: isMobile ? "100%" : "1200px",
       margin: "0 auto",
       fontFamily: "system-ui, -apple-system, sans-serif"
     }}>
       <h1 style={{
-        fontSize: "32px",
+        fontSize: isMobile ? "24px" : "32px",
         fontWeight: "bold",
-        marginBottom: "8px",
+        marginBottom: isMobile ? "4px" : "8px",
         color: "#111827"
       }}>
         Neural Network Training Visualizer
       </h1>
       <p style={{
-        fontSize: "16px",
+        fontSize: isMobile ? "14px" : "16px",
         color: "#6b7280",
-        marginBottom: "32px"
+        marginBottom: isMobile ? "20px" : "32px"
       }}>
         Training on Iris Dataset: 4 inputs → 8 → 8 → 3 outputs
       </p>
 
       {/* Controls */}
       <div style={{
-        marginBottom: "32px",
+        marginBottom: isMobile ? "24px" : "32px",
         display: "flex",
-        gap: "16px",
-        alignItems: "center",
-        flexWrap: "wrap"
+        gap: isMobile ? "12px" : "16px",
+        alignItems: isMobile ? "stretch" : "center",
+        flexWrap: "wrap",
+        flexDirection: isMobile ? "column" : "row",
+        width: "100%"
       }}>
         <button
           onClick={handleStartTraining}
@@ -222,11 +261,32 @@ function Container() {
             border: "none",
             borderRadius: "8px",
             cursor: isTraining ? "not-allowed" : "pointer",
-            transition: "background 0.2s"
+            transition: "background 0.2s",
+            width: isMobile ? "100%" : "auto"
           }}
         >
           {isTraining ? "Training..." : "Start Training"}
         </button>
+
+        {isTraining && (
+          <button
+            onClick={isPaused ? handleResumeTraining : handlePauseTraining}
+            style={{
+              padding: "12px 24px",
+              fontSize: "16px",
+              fontWeight: "600",
+              color: "white",
+              background: isPaused ? "#10b981" : "#f97316",
+              border: "none",
+              borderRadius: "8px",
+              cursor: "pointer",
+              transition: "background 0.2s",
+              width: isMobile ? "100%" : "auto"
+            }}
+          >
+            {isPaused ? "Resume Training" : "Pause Training"}
+          </button>
+        )}
 
         {snapshots.length > 0 && (
           <>
@@ -241,7 +301,8 @@ function Container() {
                 background: currentEpoch === 0 ? "#e5e7eb" : "white",
                 border: "2px solid #d1d5db",
                 borderRadius: "8px",
-                cursor: currentEpoch === 0 ? "not-allowed" : "pointer"
+                cursor: currentEpoch === 0 ? "not-allowed" : "pointer",
+                width: isMobile ? "100%" : "auto"
               }}
             >
               ← Previous Epoch
@@ -258,7 +319,8 @@ function Container() {
                 background: isAnimating ? "#9ca3af" : "#10b981",
                 border: "none",
                 borderRadius: "8px",
-                cursor: isAnimating ? "not-allowed" : "pointer"
+                cursor: isAnimating ? "not-allowed" : "pointer",
+                width: isMobile ? "100%" : "auto"
               }}
             >
               {isAnimating ? "Animating..." : "▶️ Animate Epoch"}
@@ -275,7 +337,8 @@ function Container() {
                 background: currentEpoch === maxEpochs - 1 ? "#e5e7eb" : "white",
                 border: "2px solid #d1d5db",
                 borderRadius: "8px",
-                cursor: currentEpoch === maxEpochs - 1 ? "not-allowed" : "pointer"
+                cursor: currentEpoch === maxEpochs - 1 ? "not-allowed" : "pointer",
+                width: isMobile ? "100%" : "auto"
               }}
             >
               Next Epoch →
@@ -283,7 +346,8 @@ function Container() {
 
             <div style={{
               fontSize: "14px",
-              color: "#6b7280"
+              color: "#6b7280",
+              alignSelf: isMobile ? "flex-start" : "center"
             }}>
               Epoch {currentEpoch + 1} / {maxEpochs}
             </div>
@@ -296,16 +360,17 @@ function Container() {
         <div style={{
           border: "2px dashed #e5e7eb",
           borderRadius: "8px",
-          padding: "40px",
+          padding: isMobile ? "20px" : "40px",
           textAlign: "center",
-          background: "#f9fafb"
+          background: "#f9fafb",
+          overflowX: "auto"
         }}>
           <NetworkVisualizer
             mlp={trainingManager.getNetwork()}
             inputs={trainingManager.getTrainData()[0]?.inputs || []}
             snapshot={getCurrentSnapshot()}
-            width={900}
-            height={500}
+            width={vizWidth}
+            height={vizHeight}
             animate={isAnimating}
             onAnimationComplete={handleAnimationComplete}
             key={`${currentEpoch}-${animationTrigger}`}
@@ -318,7 +383,7 @@ function Container() {
               marginTop: "16px",
               display: "flex",
               flexDirection: "column",
-              gap: "12px",
+              gap: isMobile ? "16px" : "12px",
               alignItems: "center"
             }}>
               {/* Forward Pass Legend */}
@@ -326,9 +391,11 @@ function Container() {
                 display: "flex",
                 justifyContent: "center",
                 alignItems: "center",
-                gap: "20px",
-                fontSize: "13px",
-                color: "#6b7280"
+                gap: isMobile ? "12px" : "20px",
+                fontSize: isMobile ? "12px" : "13px",
+                color: "#6b7280",
+                flexWrap: "wrap",
+                rowGap: "8px"
               }}>
                 <div style={{ fontWeight: "600", color: "#3b82f6" }}>Forward Pass:</div>
                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -378,9 +445,11 @@ function Container() {
                 display: "flex",
                 justifyContent: "center",
                 alignItems: "center",
-                gap: "20px",
-                fontSize: "13px",
-                color: "#6b7280"
+                gap: isMobile ? "12px" : "20px",
+                fontSize: isMobile ? "12px" : "13px",
+                color: "#6b7280",
+                flexWrap: "wrap",
+                rowGap: "8px"
               }}>
                 <div style={{ fontWeight: "600", color: "#f97316" }}>Backward Pass:</div>
                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -427,35 +496,38 @@ function Container() {
             </div>
           )}
 
-          {epochMetrics.length > 0 && (
+          {passMetrics.length > 0 && (
             <div style={{
-              marginTop: "32px",
-              padding: "16px",
+              marginTop: isMobile ? "24px" : "32px",
+              padding: isMobile ? "12px" : "16px",
               background: "#ffffff",
               borderRadius: "8px",
-              border: "1px solid #e5e7eb"
+              border: "1px solid #e5e7eb",
+              overflowX: "auto"
             }}>
               <div style={{
                 fontWeight: 600,
-                fontSize: "15px",
+                fontSize: isMobile ? "14px" : "15px",
                 color: "#111827",
                 marginBottom: "12px"
               }}>
-                Training Metrics by Epoch
+                Training Metrics by Pass
               </div>
-              <MetricsChart metrics={epochMetrics} />
+              <div style={{ display: "flex", justifyContent: "center", minWidth: metricsWidth }}>
+                <MetricsChart metrics={passMetrics} width={metricsWidth} height={metricsHeight} />
+              </div>
             </div>
           )}
 
           {snapshots.length > 0 && currentSnapshot && (
             <>
               <div style={{
-                marginTop: "20px",
-                padding: "16px",
+                marginTop: isMobile ? "16px" : "20px",
+                padding: isMobile ? "12px" : "16px",
                 background: "#ffffff",
                 borderRadius: "8px",
                 textAlign: "left",
-                fontSize: "14px",
+                fontSize: isMobile ? "13px" : "14px",
                 color: "#374151"
               }}>
                 <div style={{ fontWeight: "600", marginBottom: "8px" }}>
@@ -468,23 +540,23 @@ function Container() {
 
               <div style={{
                 marginTop: "16px",
-                padding: "16px",
+                padding: isMobile ? "12px" : "16px",
                 background: "#ffffff",
                 borderRadius: "8px",
                 textAlign: "left",
-                fontSize: "14px",
+                fontSize: isMobile ? "13px" : "14px",
                 color: "#374151",
                 display: "grid",
-                gap: "16px"
+                gap: isMobile ? "12px" : "16px"
               }}>
                 <div style={{ fontWeight: 600 }}>Current Sample Details</div>
                 <div style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                  gap: "16px"
+                  gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(200px, 1fr))",
+                  gap: isMobile ? "12px" : "16px"
                 }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>
+                    <div style={{ fontSize: isMobile ? "12px" : "13px", fontWeight: 600, color: "#111827" }}>
                       Inputs
                     </div>
                     {labeledInputs.map(({ label, value }) => (
@@ -493,11 +565,11 @@ function Container() {
                         style={{
                           display: "flex",
                           justifyContent: "space-between",
-                          padding: "8px 12px",
+                          padding: isMobile ? "8px 10px" : "8px 12px",
                           background: "#f9fafb",
                           borderRadius: "6px",
                           border: "1px solid #e5e7eb",
-                          fontSize: "13px"
+                          fontSize: isMobile ? "12px" : "13px"
                         }}
                       >
                         <span>{label}</span>
@@ -507,7 +579,7 @@ function Container() {
                   </div>
 
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    <div style={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>
+                    <div style={{ fontSize: isMobile ? "12px" : "13px", fontWeight: 600, color: "#111827" }}>
                       Output predictions
                     </div>
                     {labeledOutputs.map(({ label, value, idx }) => {
@@ -528,11 +600,11 @@ function Container() {
                           style={{
                             display: "flex",
                             justifyContent: "space-between",
-                            padding: "8px 12px",
+                            padding: isMobile ? "8px 10px" : "8px 12px",
                             background,
                             borderRadius: "6px",
                             border: `1px solid ${border}`,
-                            fontSize: "13px",
+                            fontSize: isMobile ? "12px" : "13px",
                             fontWeight: isPrediction ? 600 : 500,
                             color: "#111827",
                             fontVariantNumeric: "tabular-nums"
@@ -550,7 +622,7 @@ function Container() {
                     })}
                   </div>
                 </div>
-                <div style={{ fontSize: "13px", color: "#4b5563" }}>
+                <div style={{ fontSize: isMobile ? "12px" : "13px", color: "#4b5563" }}>
                   Predicted class: <strong>{IRIS_CLASS_NAMES[currentSnapshot.prediction] ?? "Unknown"}</strong> • Actual class: <strong>{IRIS_CLASS_NAMES[currentSnapshot.actualClass] ?? currentSnapshot.sample.label}</strong>
                 </div>
               </div>
