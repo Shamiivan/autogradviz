@@ -107,6 +107,10 @@ function Container() {
 
   const handleResumeTraining = () => {
     if (!trainingManager || !isTraining || !isPaused) return;
+    if (isAnimating) {
+      setIsAnimating(false);
+      setAnimationTrigger(prev => prev + 1);
+    }
     trainingManager.resume();
     setIsPaused(false);
     setStatusMessage(null);
@@ -143,6 +147,7 @@ function Container() {
   // Animation complete callback
   const handleAnimationComplete = () => {
     setIsAnimating(false);
+    setStatusMessage(prev => prev === ANIMATION_PAUSE_MESSAGE ? MANUAL_PAUSE_MESSAGE : prev);
   };
 
   // Get snapshots for current epoch
@@ -209,12 +214,20 @@ function Container() {
 
   const trainSamples = useMemo(() => trainingManager ? trainingManager.getTrainData() : [], [trainingManager]);
 
-  const vizWidth = Math.max((isMobile ? viewportWidth - 32 : 900), 320);
-  const vizHeight = isMobile ? 420 : 500;
-  const metricsWidth = Math.max((isMobile ? viewportWidth - 32 : 860), 320);
+  const horizontalPadding = isMobile ? 32 : 96;
+  const availableWidth = Math.max(320, viewportWidth - horizontalPadding);
+  const maxNetworkWidth = isMobile ? availableWidth : Math.min(1120, availableWidth);
+  const vizWidth = Math.min(maxNetworkWidth, availableWidth);
+  const vizHeight = isMobile ? 420 : 520;
+  const metricsWidth = Math.max(
+    isMobile ? viewportWidth - 32 : Math.min(vizWidth, 960),
+    320
+  );
   const metricsHeight = isMobile ? 220 : 260;
-  const scatterWidth = isMobile ? vizWidth : 240;
-  const scatterHeight = isMobile ? 200 : 220;
+  const scatterWidth = isMobile
+    ? vizWidth
+    : Math.min(Math.max(280, vizWidth / 3 - 24), 380);
+  const scatterHeight = isMobile ? 220 : 240;
 
   const controlWrapperStyle: CSSProperties = {
     marginBottom: isMobile ? "28px" : "32px",
@@ -313,7 +326,6 @@ function Container() {
           {isTraining && (
             <button
               onClick={isPaused ? handleResumeTraining : handlePauseTraining}
-              disabled={isAnimating}
               style={{
                 padding: "12px 24px",
                 fontSize: "16px",
@@ -322,9 +334,10 @@ function Container() {
                 background: isPaused ? "#10b981" : "#f97316",
                 border: "none",
                 borderRadius: "8px",
-                cursor: isAnimating ? "not-allowed" : "pointer",
+                cursor: "pointer",
                 transition: "background 0.2s",
-                width: isMobile ? "100%" : "auto"
+                width: isMobile ? "100%" : "auto",
+                boxShadow: isPaused ? "0 0 0 3px rgba(16, 185, 129, 0.2)" : undefined
               }}
             >
               {isPaused ? "Resume Training" : "Pause Training"}
@@ -412,17 +425,20 @@ function Container() {
           border: "2px dashed #e5e7eb",
           borderRadius: "8px",
           padding: isMobile ? "20px" : "40px",
-          textAlign: "center",
-          background: "#f9fafb",
-          overflowX: "auto"
+          background: "#f9fafb"
         }}>
           <div style={{
             display: "flex",
-            flexDirection: isMobile ? "column" : "row",
-            gap: isMobile ? "16px" : "24px",
-            alignItems: "stretch"
+            flexDirection: "column",
+            gap: isMobile ? "20px" : "28px",
+            width: "100%"
           }}>
-            <div style={{ position: "relative", flex: "1 1 auto", minWidth: 0 }}>
+            <div style={{
+              position: "relative",
+              width: "100%",
+              display: "flex",
+              justifyContent: "center"
+            }}>
               <NetworkVisualizer
                 mlp={trainingManager.getNetwork()}
                 inputs={trainSamples[0]?.inputs || []}
@@ -434,24 +450,137 @@ function Container() {
                 key={`${currentEpoch}-${animationTrigger}`}
                 epochSnapshots={getCurrentEpochSnapshots()}
               />
-              <LegendOverlay />
             </div>
-            {trainSamples.length > 0 && (
-              <div style={{
-                flex: isMobile ? "0 0 auto" : "0 0 240px",
-                display: "flex",
-                justifyContent: "center"
-              }}>
-                <FeatureScatter
-                  samples={trainSamples}
-                  currentSample={currentSnapshot?.sample}
-                  width={scatterWidth}
-                  height={scatterHeight}
-                />
-              </div>
-            )}
-          </div>
 
+            <div style={{
+              display: "flex",
+              flexDirection: isMobile ? "column" : "row",
+              gap: isMobile ? "16px" : "20px",
+              alignItems: "stretch",
+              width: "100%",
+              flexWrap: isMobile ? "nowrap" : "wrap"
+            }}>
+              {currentSnapshot && (
+                <div style={{
+                  flex: "1 1 0",
+                  background: "#ffffff",
+                  borderRadius: "10px",
+                  border: "1px solid #e5e7eb",
+                  padding: "14px 16px",
+                  color: "#374151",
+                  fontSize: "13px",
+                  minWidth: isMobile ? "100%" : "280px",
+                  boxShadow: "0 12px 24px rgba(15, 23, 42, 0.06)"
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: "8px", color: "#111827" }}>
+                    Epoch {currentEpoch + 1} Snapshot
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <span>Training Samples this epoch: {currentEpochSnapshots.length}</span>
+                    <span>Average Loss: {currentEpochAvgLoss.toFixed(4)}</span>
+                    <span>Accuracy: {currentEpochAccuracy.toFixed(1)}%</span>
+                  </div>
+                </div>
+              )}
+
+              {currentSnapshot && (
+                <div style={{
+                  flex: "1 1 0",
+                  background: "#ffffff",
+                  borderRadius: "10px",
+                  border: "1px solid #e5e7eb",
+                  padding: "14px 16px",
+                  color: "#374151",
+                  fontSize: "13px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "12px",
+                  minWidth: isMobile ? "100%" : "280px",
+                  boxShadow: "0 12px 24px rgba(15, 23, 42, 0.06)"
+                }}>
+                  <div style={{ fontWeight: 600, color: "#111827" }}>Current Sample</div>
+                  <div>
+                    <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Inputs</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {labeledInputs.map(({ label, value }) => (
+                        <div key={label} style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          padding: "8px 10px",
+                          background: "#f9fafb",
+                          borderRadius: "6px",
+                          border: "1px solid #e5e7eb",
+                          fontVariantNumeric: "tabular-nums"
+                        }}>
+                          <span>{label}</span>
+                          <span>{value.toFixed(2)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "6px" }}>Output activations</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {labeledOutputs.map(({ label, value, idx }) => {
+                        const isPrediction = currentSnapshot.prediction === idx;
+                        const isTarget = currentSnapshot.actualClass === idx;
+                        const background = isPrediction && isTarget
+                          ? "#dcfce7"
+                          : isPrediction
+                            ? "#dbeafe"
+                            : isTarget
+                              ? "#fef9c3"
+                              : "#f9fafb";
+                        const border = isPrediction || isTarget ? "#94a3b8" : "#e5e7eb";
+
+                        return (
+                          <div key={label} style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            padding: "8px 10px",
+                            background,
+                            borderRadius: "6px",
+                            border: `1px solid ${border}`,
+                            fontWeight: isPrediction ? 600 : 500,
+                            fontVariantNumeric: "tabular-nums"
+                          }}>
+                            <span>
+                              {label}
+                              {isTarget ? " (target)" : ""}
+                              {isPrediction && !isTarget ? " (prediction)" : ""}
+                              {isPrediction && isTarget ? " (correct)" : ""}
+                            </span>
+                            <span>{value.toFixed(2)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "#4b5563" }}>
+                    Predicted: <strong>{IRIS_CLASS_NAMES[currentSnapshot.prediction] ?? "Unknown"}</strong>
+                    <br />
+                    Actual: <strong>{IRIS_CLASS_NAMES[currentSnapshot.actualClass] ?? currentSnapshot.sample.label}</strong>
+                  </div>
+                </div>
+              )}
+
+              {trainSamples.length > 0 && (
+                <div style={{
+                  flex: "1 1 0",
+                  display: "flex",
+                  justifyContent: "center",
+                  minWidth: isMobile ? "100%" : "280px"
+                }}>
+                  <FeatureScatter
+                    samples={trainSamples}
+                    currentSample={currentSnapshot?.sample}
+                    width={scatterWidth}
+                    height={scatterHeight}
+                  />
+                </div>
+              )}
+            </div>
+          </div>
 
           {passMetrics.length > 0 && (
             <div style={{
@@ -476,115 +605,7 @@ function Container() {
             </div>
           )}
 
-          {snapshots.length > 0 && currentSnapshot && (
-            <>
-              <div style={{
-                marginTop: isMobile ? "16px" : "20px",
-                padding: isMobile ? "12px" : "16px",
-                background: "#ffffff",
-                borderRadius: "8px",
-                textAlign: "left",
-                fontSize: isMobile ? "13px" : "14px",
-                color: "#374151"
-              }}>
-                <div style={{ fontWeight: "600", marginBottom: "8px" }}>
-                  Epoch {currentEpoch + 1} Summary:
-                </div>
-                <div>Training Samples: {currentEpochSnapshots.length}</div>
-                <div>Average Loss: {currentEpochAvgLoss.toFixed(4)}</div>
-                <div>Accuracy: {currentEpochAccuracy.toFixed(1)}%</div>
-              </div>
-
-              <div style={{
-                marginTop: "16px",
-                padding: isMobile ? "12px" : "16px",
-                background: "#ffffff",
-                borderRadius: "8px",
-                textAlign: "left",
-                fontSize: isMobile ? "13px" : "14px",
-                color: "#374151",
-                display: "grid",
-                gap: isMobile ? "12px" : "16px"
-              }}>
-                <div style={{ fontWeight: 600 }}>Current Sample Details</div>
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(200px, 1fr))",
-                  gap: isMobile ? "12px" : "16px"
-                }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    <div style={{ fontSize: isMobile ? "12px" : "13px", fontWeight: 600, color: "#111827" }}>
-                      Inputs
-                    </div>
-                    {labeledInputs.map(({ label, value }) => (
-                      <div
-                        key={label}
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          padding: isMobile ? "8px 10px" : "8px 12px",
-                          background: "#f9fafb",
-                          borderRadius: "6px",
-                          border: "1px solid #e5e7eb",
-                          fontSize: isMobile ? "12px" : "13px"
-                        }}
-                      >
-                        <span>{label}</span>
-                        <span style={{ fontVariantNumeric: "tabular-nums" }}>{value.toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    <div style={{ fontSize: isMobile ? "12px" : "13px", fontWeight: 600, color: "#111827" }}>
-                      Output predictions
-                    </div>
-                    {labeledOutputs.map(({ label, value, idx }) => {
-                      const isPrediction = currentSnapshot.prediction === idx;
-                      const isTarget = currentSnapshot.actualClass === idx;
-                      const background = isPrediction && isTarget
-                        ? "#dcfce7"
-                        : isPrediction
-                          ? "#dbeafe"
-                          : isTarget
-                            ? "#fef9c3"
-                            : "#f9fafb";
-                      const border = isPrediction || isTarget ? "#94a3b8" : "#e5e7eb";
-
-                      return (
-                        <div
-                          key={label}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            padding: isMobile ? "8px 10px" : "8px 12px",
-                            background,
-                            borderRadius: "6px",
-                            border: `1px solid ${border}`,
-                            fontSize: isMobile ? "12px" : "13px",
-                            fontWeight: isPrediction ? 600 : 500,
-                            color: "#111827",
-                            fontVariantNumeric: "tabular-nums"
-                          }}
-                        >
-                          <span>
-                            {label}
-                            {isTarget ? " (target)" : ""}
-                            {isPrediction && !isTarget ? " (prediction)" : ""}
-                            {isPrediction && isTarget ? " (correct)" : ""}
-                          </span>
-                          <span>{value.toFixed(2)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-                <div style={{ fontSize: isMobile ? "12px" : "13px", color: "#4b5563" }}>
-                  Predicted class: <strong>{IRIS_CLASS_NAMES[currentSnapshot.prediction] ?? "Unknown"}</strong> • Actual class: <strong>{IRIS_CLASS_NAMES[currentSnapshot.actualClass] ?? currentSnapshot.sample.label}</strong>
-                </div>
-              </div>
-            </>
-          )}
+          <LegendOverlay />
         </div>
       )}
     </div>

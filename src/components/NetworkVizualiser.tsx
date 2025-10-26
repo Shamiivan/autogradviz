@@ -33,11 +33,15 @@ interface EdgeData {
   weight: number;
 }
 
+const NODE_RADIUS = 18;
+const MIN_NODE_SPACING = NODE_RADIUS * 2.6;
+const MAX_NODE_SPACING = NODE_RADIUS * 5;
+
 export function NetworkVisualizer({
   mlp,
   inputs,
   snapshot,
-  width = 900,
+  width = 1000,
   height = 500,
   animate = false,
   onAnimationComplete,
@@ -46,7 +50,12 @@ export function NetworkVisualizer({
   const svgRef = useRef<SVGSVGElement>(null);
   const animationRef = useRef<boolean>(false);
 
-  // Activation threshold - nodes only fill if activation > 0.3
+  const layerSizes = [inputs.length, ...mlp.layers.map(layer => layer.neurons.length)];
+  const maxLayerSize = layerSizes.length > 0 ? Math.max(...layerSizes) : 1;
+  const baseVerticalPadding = NODE_RADIUS * 3;
+  const minCanvasHeight = baseVerticalPadding * 2 + Math.max(maxLayerSize - 1, 0) * MIN_NODE_SPACING;
+  const canvasHeight = Math.max(height, minCanvasHeight);
+
   const ACTIVATION_THRESHOLD = 0.5;
 
   // Gradient threshold - show gradient color if > 0.01
@@ -57,15 +66,41 @@ export function NetworkVisualizer({
 
     const svg = d3.select(svgRef.current);
     svg.selectAll('*').remove();
+    svg
+      .attr('height', canvasHeight)
+      .attr('viewBox', `0 0 ${width} ${canvasHeight}`)
+      .attr('preserveAspectRatio', 'xMidYMid meet');
 
     // Extract network structure
     const nodes: NodeData[] = [];
     const edges: EdgeData[] = [];
 
     const numLayers = mlp.layers.length + 1; // +1 for input layer
+    const maxHorizontalPadding = Math.max(40, width / 2 - NODE_RADIUS * 2);
+    const horizontalPadding = Math.min(Math.max(width * 0.12, 48), maxHorizontalPadding);
+    const startX = horizontalPadding;
+    const endX = Math.max(startX + 80, width - horizontalPadding);
     const layerX = d3.scaleLinear()
       .domain([0, numLayers - 1])
-      .range([80, width - 80]);
+      .range([startX, endX]);
+
+    const verticalPadding = Math.max(
+      baseVerticalPadding,
+      (canvasHeight - Math.max(maxLayerSize - 1, 0) * MIN_NODE_SPACING) / 2
+    );
+    const availableHeight = Math.max(canvasHeight - verticalPadding * 2, NODE_RADIUS * 2);
+    const getNodeY = (layerSize: number, index: number) => {
+      if (layerSize <= 1) {
+        return canvasHeight / 2;
+      }
+      const spacing = Math.min(
+        MAX_NODE_SPACING,
+        Math.max(MIN_NODE_SPACING, availableHeight / (layerSize - 1))
+      );
+      const totalLayerHeight = spacing * (layerSize - 1);
+      const startY = (canvasHeight - totalLayerHeight) / 2;
+      return startY + index * spacing;
+    };
 
     // Create enhanced color scale with more dramatic differences
     // FOR FORWARD PASS (ACTIVATION)
@@ -101,7 +136,7 @@ export function NetworkVisualizer({
     // Input layer
     for (let i = 0; i < inputs.length; i++) {
       const layerSize = inputs.length;
-      const y = height / 2 + (i - (layerSize - 1) / 2) * 60;
+      const y = getNodeY(layerSize, i);
 
       // Get activation from snapshot if available
       const activation = snapshot ? snapshot.activations[0][i] : undefined;
@@ -127,7 +162,7 @@ export function NetworkVisualizer({
 
       layer.neurons.forEach((neuron, neuronIdx) => {
         const layerSize = layer.neurons.length;
-        const y = height / 2 + (neuronIdx - (layerSize - 1) / 2) * 60;
+        const y = getNodeY(layerSize, neuronIdx);
         const nodeId = `L${layerNum}-${neuronIdx}`;
 
         // Get activation from snapshot if available
@@ -242,7 +277,7 @@ export function NetworkVisualizer({
       .append('circle')
       .attr('cx', d => d.x)
       .attr('cy', d => d.y)
-      .attr('r', 18)
+      .attr('r', NODE_RADIUS)
       .attr('fill', d => {
         // Start with white/empty if animating
         if (animate && !animationRef.current) {
@@ -416,7 +451,7 @@ export function NetworkVisualizer({
               .delay(delay + 100)
               .attr('fill', fillColor)
               .attr('stroke', strokeColor)
-              .attr('r', 18 * scale); // GROW for high activation
+              .attr('r', NODE_RADIUS * scale); // GROW for high activation
 
             // Show activation value
             nodeLabel
@@ -507,7 +542,7 @@ export function NetworkVisualizer({
               .attr('fill', gradFillColor)
               .attr('stroke', gradStrokeColor)
               .attr('stroke-width', gradStrokeWidth)
-              .attr('r', 18 * scale); // SHRINK for high gradient
+              .attr('r', NODE_RADIUS * scale); // SHRINK for high gradient
 
             // Show gradient value
             if (gradient >= GRADIENT_THRESHOLD) {
@@ -583,7 +618,7 @@ export function NetworkVisualizer({
                 .attr('fill', 'white')
                 .attr('stroke', '#9ca3af')
                 .attr('stroke-width', 2.5)
-                .attr('r', 18); // Reset size
+                .attr('r', NODE_RADIUS); // Reset size
 
               svg.select(`.node-${node.id}`).select('.node-label')
                 .transition()
@@ -605,13 +640,13 @@ export function NetworkVisualizer({
       animateSample(0);
     }
 
-  }, [mlp, inputs, snapshot, width, height, animate, onAnimationComplete, epochSnapshots]);
+  }, [mlp, inputs, snapshot, width, canvasHeight, animate, onAnimationComplete, epochSnapshots, baseVerticalPadding, maxLayerSize]);
 
   return (
     <svg
       ref={svgRef}
       width={width}
-      height={height}
+      height={canvasHeight}
       style={{
         border: '1px solid #e5e7eb',
         borderRadius: '8px',
